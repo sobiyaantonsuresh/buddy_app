@@ -275,7 +275,7 @@ class _ScreenBatteryState extends State<ScreenBattery> {
                                   ),
                                   Switch(
                                     value: _powerSavingMode,
-                                    activeColor: const Color(0xFF2F80FF),
+                                    activeThumbColor: const Color(0xFF2F80FF),
                                     onChanged: (val) => setState(() => _powerSavingMode = val),
                                   ),
                                 ],
@@ -293,7 +293,7 @@ class _ScreenBatteryState extends State<ScreenBattery> {
                                   ),
                                   Switch(
                                     value: _autoReturnDock,
-                                    activeColor: const Color(0xFF2F80FF),
+                                    activeThumbColor: const Color(0xFF2F80FF),
                                     onChanged: (val) => setState(() => _autoReturnDock = val),
                                   ),
                                 ],

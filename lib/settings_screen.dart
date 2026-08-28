@@ -328,7 +328,7 @@ class _ScreenSettingsState extends State<ScreenSettings> {
                                   ),
                                   Switch(
                                     value: _emotionDetection,
-                                    activeColor: const Color(0xFF2F80FF),
+                                    activeThumbColor: const Color(0xFF2F80FF),
                                     onChanged: (val) => setState(() => _emotionDetection = val),
                                   ),
                                 ],
@@ -347,7 +347,7 @@ class _ScreenSettingsState extends State<ScreenSettings> {
                                   ),
                                   Switch(
                                     value: _faceRecognition,
-                                    activeColor: const Color(0xFF2F80FF),
+                                    activeThumbColor: const Color(0xFF2F80FF),
                                     onChanged: (val) => setState(() => _faceRecognition = val),
                                   ),
                                 ],
