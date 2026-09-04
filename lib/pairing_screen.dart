@@ -334,7 +334,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                                   ),
                                   Switch(
                                     value: _isBluetoothEnabled,
-                                    activeColor: const Color(0xFF2F80FF),
+                                    activeThumbColor: const Color(0xFF2F80FF),
                                     onChanged: (val) => setState(() => _isBluetoothEnabled = val),
                                   ),
                                 ],
@@ -359,7 +359,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                                   ),
                                   Switch(
                                     value: _isWifiDirectEnabled,
-                                    activeColor: const Color(0xFF2F80FF),
+                                    activeThumbColor: const Color(0xFF2F80FF),
                                     onChanged: (val) => setState(() => _isWifiDirectEnabled = val),
                                   ),
                                 ],

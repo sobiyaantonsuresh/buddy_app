@@ -232,7 +232,7 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: filteredItems.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 10),
+                            separatorBuilder: (_, _) => const SizedBox(height: 10),
                             itemBuilder: (context, index) {
                               final item = filteredItems[index];
                               final isCritical = item['title'].toString().contains('CRITICAL');
