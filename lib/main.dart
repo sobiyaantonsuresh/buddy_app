@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'login_screen.dart';
 
 void main() {
@@ -57,7 +59,7 @@ class _BuddyMainAppState extends State<BuddyMainApp> {
   }
 }
 
-class ScreenWelcome extends StatelessWidget {
+class ScreenWelcome extends StatefulWidget {
   final bool isDarkMode;
   final VoidCallback onThemeToggle;
 
@@ -67,13 +69,69 @@ class ScreenWelcome extends StatelessWidget {
     required this.onThemeToggle,
   });
 
+  @override
+  State<ScreenWelcome> createState() => _ScreenWelcomeState();
+}
+
+class _ScreenWelcomeState extends State<ScreenWelcome> {
+  static const String _baseUrl = "http://192.168.8.192:5000";
+  Timer? _clockTimer;
+  Timer? _pingTimer;
+  String _currentTimeString = '';
+  bool _isRobotReachable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateClock();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
+    _pingRobot();
+    _pingTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pingRobot());
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    _pingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _updateClock() {
+    final now = DateTime.now();
+    final hour = now.hour % 12 == 0 ? 12 : now.hour % 12;
+    final minute = now.minute.toString().padLeft(2, '0');
+    final period = now.hour >= 12 ? 'PM' : 'AM';
+    if (mounted) {
+      setState(() {
+        _currentTimeString = '$hour:$minute $period';
+      });
+    }
+  }
+
+  Future<void> _pingRobot() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/api/robot_status')).timeout(const Duration(seconds: 2));
+      if (mounted) {
+        setState(() {
+          _isRobotReachable = res.statusCode == 200;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isRobotReachable = false;
+        });
+      }
+    }
+  }
+
   void _navigateToLogin(BuildContext context) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => BuddyLoginScreen(
-          isDarkMode: isDarkMode,
-          onThemeToggle: onThemeToggle,
+          isDarkMode: widget.isDarkMode,
+          onThemeToggle: widget.onThemeToggle,
         ),
       ),
     );
@@ -81,7 +139,7 @@ class ScreenWelcome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = isDarkMode;
+    final isDark = widget.isDarkMode;
 
     return Scaffold(
       body: SafeArea(
@@ -90,15 +148,16 @@ class ScreenWelcome extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
               children: [
+                // Real-time Top Status Bar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        '9:41',
+                        _currentTimeString.isEmpty ? '...' : _currentTimeString,
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: isDark ? Colors.white : Colors.black87,
                         ),
@@ -112,11 +171,19 @@ class ScreenWelcome extends StatelessWidget {
                               size: 20,
                             ),
                             tooltip: 'Toggle Theme',
-                            onPressed: onThemeToggle,
+                            onPressed: widget.onThemeToggle,
                           ),
-                          Icon(Icons.wifi, size: 18, color: isDark ? Colors.white70 : Colors.black54),
+                          Icon(
+                            Icons.wifi,
+                            size: 18,
+                            color: _isRobotReachable ? const Color(0xFF27AE60) : Colors.redAccent,
+                          ),
                           const SizedBox(width: 8),
-                          Icon(Icons.battery_full, size: 20, color: isDark ? Colors.white70 : Colors.black54),
+                          Icon(
+                            Icons.battery_full,
+                            size: 20,
+                            color: isDark ? Colors.white70 : Colors.black54,
+                          ),
                         ],
                       ),
                     ],
@@ -173,11 +240,14 @@ class ScreenWelcome extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Your AI-powered companion is ready to connect',
+                          _isRobotReachable
+                              ? 'BUDDY is online and ready to connect'
+                              : 'Connecting to BUDDY on local Wi-Fi...',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 14,
-                            color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                            color: _isRobotReachable ? const Color(0xFF27AE60) : (isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B)),
+                            fontWeight: _isRobotReachable ? FontWeight.w600 : FontWeight.normal,
                           ),
                         ),
                         const SizedBox(height: 32),

@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'home_screen.dart';
 import 'control_screen.dart';
 import 'camera_screen.dart';
@@ -22,7 +25,91 @@ class ScreenSecurity extends StatefulWidget {
 class _ScreenSecurityState extends State<ScreenSecurity> {
   int _selectedNavIndex = 3;
   bool _isPatrolActive = true;
-  final double _progress = 0.65;
+  double _progress = 0.65;
+  String _elapsedTime = 'Elapsed: 2h 15m';
+  int _threatCount = 0;
+
+  static const String _baseUrl = "http://192.168.8.192:5000";
+  Timer? _clockTimer;
+  Timer? _pollingTimer;
+  String _currentTimeString = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _updateClock();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
+    _fetchSecurityStatus();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) => _fetchSecurityStatus());
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _updateClock() {
+    final now = DateTime.now();
+    final hour = now.hour % 12 == 0 ? 12 : now.hour % 12;
+    final minute = now.minute.toString().padLeft(2, '0');
+    final period = now.hour >= 12 ? 'PM' : 'AM';
+    if (mounted) {
+      setState(() {
+        _currentTimeString = '$hour:$minute $period';
+      });
+    }
+  }
+
+  Future<void> _fetchSecurityStatus() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/api/security/status')).timeout(const Duration(seconds: 2));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          setState(() {
+            _isPatrolActive = data['patrol_active'] ?? _isPatrolActive;
+            _progress = (data['progress'] as num?)?.toDouble() ?? _progress;
+            _elapsedTime = data['elapsed'] ?? _elapsedTime;
+            _threatCount = (data['threats_count'] as num?)?.toInt() ?? _threatCount;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _togglePatrol() async {
+    final nextState = !_isPatrolActive;
+    setState(() => _isPatrolActive = nextState);
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(nextState ? 'Patrol resumed.' : 'Patrol halted.'),
+        duration: const Duration(seconds: 1),
+        backgroundColor: nextState ? const Color(0xFF27AE60) : const Color(0xFFEB5757),
+      ),
+    );
+
+    try {
+      await http.post(
+        Uri.parse('$_baseUrl/api/security/toggle_patrol'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'active': nextState}),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _sendEmergencySignal(String serviceName, String number) async {
+    try {
+      await http.post(
+        Uri.parse('$_baseUrl/api/security/emergency_alert'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'service': serviceName, 'number': number}),
+      );
+    } catch (_) {}
+  }
 
   void _onBottomNavTapped(int index) {
     if (index == 0) {
@@ -165,6 +252,7 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
             ),
             onPressed: () {
               Navigator.pop(context);
+              _sendEmergencySignal(serviceName, number);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Calling $serviceName ($number)... Live dispatch active!'),
@@ -236,9 +324,9 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
                             onPressed: () => Navigator.maybePop(context),
                           ),
                           Text(
-                            '9:41',
+                            _currentTimeString.isEmpty ? '...' : _currentTimeString,
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
@@ -329,7 +417,7 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
                                     ],
                                   ),
                                   Text(
-                                    _isPatrolActive ? 'Elapsed: 2h 15m' : 'Standby',
+                                    _isPatrolActive ? _elapsedTime : 'Standby',
                                     style: TextStyle(
                                       color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
                                       fontSize: 12,
@@ -363,7 +451,7 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: LinearProgressIndicator(
-                                  value: _progress,
+                                  value: _progress.clamp(0.0, 1.0),
                                   minHeight: 6,
                                   backgroundColor: isDark ? const Color(0xFF08111F) : const Color(0xFFE2E8F0),
                                   valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF2F80FF)),
@@ -371,14 +459,18 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
                               ),
                               const SizedBox(height: 12),
 
-                              const Row(
+                              Row(
                                 children: [
-                                  Icon(Icons.shield_outlined, size: 16, color: Color(0xFF27AE60)),
-                                  SizedBox(width: 6),
+                                  Icon(
+                                    Icons.shield_outlined,
+                                    size: 16,
+                                    color: _threatCount == 0 ? const Color(0xFF27AE60) : const Color(0xFFEB5757),
+                                  ),
+                                  const SizedBox(width: 6),
                                   Text(
-                                    '0 Threats Detected',
+                                    '$_threatCount Threats Detected',
                                     style: TextStyle(
-                                      color: Color(0xFF27AE60),
+                                      color: _threatCount == 0 ? const Color(0xFF27AE60) : const Color(0xFFEB5757),
                                       fontSize: 12,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -399,9 +491,20 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
                             border: Border.all(
                               color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
                             ),
-                            image: const DecorationImage(
-                              image: NetworkImage("https://placehold.co/600x320/0a1128/ffffff.png?text=Patrol+Route+Alpha+Map"),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: Image.network(
+                              "$_baseUrl/video_call",
                               fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: const Color(0xFF0A1128),
+                                alignment: Alignment.center,
+                                child: const Text(
+                                  'Patrol Route Stream / GPS Map Standby',
+                                  style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -418,16 +521,7 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
                                   padding: const EdgeInsets.symmetric(vertical: 13),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 ),
-                                onPressed: () {
-                                  setState(() {
-                                    _isPatrolActive = !_isPatrolActive;
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(_isPatrolActive ? 'Patrol resumed.' : 'Patrol stopped.'),
-                                    ),
-                                  );
-                                },
+                                onPressed: _togglePatrol,
                                 child: Text(
                                   _isPatrolActive ? 'Stop Patrol' : 'Resume Patrol',
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),

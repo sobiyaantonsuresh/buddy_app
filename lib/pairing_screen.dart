@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'home_screen.dart';
 import 'settings_screen.dart';
 
@@ -20,39 +22,91 @@ class _ScreenPairingState extends State<ScreenPairing> {
   bool _isBluetoothEnabled = true;
   bool _isWifiDirectEnabled = true;
   bool _isConnecting = false;
-  String _connectionStatus = 'Searching for BUDDY...';
+  String _connectionStatus = 'Ready to pair with BUDDY';
 
-  void _connectToRobot(String robotName) async {
+  static const String _baseUrl = "http://192.168.8.192:5000";
+  Timer? _clockTimer;
+  String _currentTimeString = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _updateClock();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    super.dispose();
+  }
+
+  void _updateClock() {
+    final now = DateTime.now();
+    final hour = now.hour % 12 == 0 ? 12 : now.hour % 12;
+    final minute = now.minute.toString().padLeft(2, '0');
+    final period = now.hour >= 12 ? 'PM' : 'AM';
+    if (mounted) {
+      setState(() {
+        _currentTimeString = '$hour:$minute $period';
+      });
+    }
+  }
+
+  Future<void> _connectToRobot(String robotName) async {
     setState(() {
       _isConnecting = true;
-      _connectionStatus = 'Connecting to $robotName...';
+      _connectionStatus = 'Pinging $robotName on 192.168.8.192...';
     });
 
-    await Future.delayed(const Duration(seconds: 2));
+    bool isConnected = false;
+
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/api/robot_status')).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        isConnected = true;
+      }
+    } catch (_) {
+      isConnected = false;
+    }
 
     if (!mounted) return;
-    setState(() {
-      _isConnecting = false;
-      _connectionStatus = 'Connected to $robotName!';
-    });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Successfully linked with $robotName!'),
-        backgroundColor: const Color(0xFF27AE60),
-      ),
-    );
+    if (isConnected) {
+      setState(() {
+        _isConnecting = false;
+        _connectionStatus = 'Connected to $robotName!';
+      });
 
-    // Navigate to Home screen
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ScreenHome(
-          isDarkMode: widget.isDarkMode,
-          onThemeToggle: widget.onThemeToggle,
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Successfully linked with $robotName!'),
+          backgroundColor: const Color(0xFF27AE60),
         ),
-      ),
-    );
+      );
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ScreenHome(
+            isDarkMode: widget.isDarkMode,
+            onThemeToggle: widget.onThemeToggle,
+          ),
+        ),
+      );
+    } else {
+      setState(() {
+        _isConnecting = false;
+        _connectionStatus = 'Failed to connect. Check Wi-Fi.';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot reach BUDDY on 192.168.8.192. Ensure laptop Flask is running.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 
   @override
@@ -84,9 +138,9 @@ class _ScreenPairingState extends State<ScreenPairing> {
                             onPressed: () => Navigator.maybePop(context),
                           ),
                           Text(
-                            '9:41',
+                            _currentTimeString.isEmpty ? '...' : _currentTimeString,
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
@@ -150,7 +204,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Establish a secure local network link via Bluetooth/Wi-Fi',
+                          'Establish a secure local network link via Wi-Fi Host: 192.168.8.192',
                           style: TextStyle(
                             color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
                             fontSize: 13,
@@ -200,8 +254,10 @@ class _ScreenPairingState extends State<ScreenPairing> {
                                   Container(
                                     width: 8,
                                     height: 8,
-                                    decoration: const BoxDecoration(
-                                      color: Color(0xFF2F80FF),
+                                    decoration: BoxDecoration(
+                                      color: _connectionStatus.contains('Connected')
+                                          ? const Color(0xFF27AE60)
+                                          : const Color(0xFF2F80FF),
                                       shape: BoxShape.circle,
                                     ),
                                   ),
@@ -210,7 +266,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                                     _connectionStatus,
                                     style: TextStyle(
                                       color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                      fontSize: 15,
+                                      fontSize: 14,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -271,7 +327,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                                         ),
                                       ),
                                       Text(
-                                        'Signal: Excellent (-42 dBm)',
+                                        'Host: 192.168.8.192:5000',
                                         style: TextStyle(
                                           color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
                                           fontSize: 11,
@@ -303,7 +359,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                         ),
                         const SizedBox(height: 20),
 
-                        // Wireless Toggles
+                        // Wireless Settings
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
@@ -348,7 +404,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                                       const Icon(Icons.wifi_tethering_rounded, color: Color(0xFF2F80FF), size: 20),
                                       const SizedBox(width: 10),
                                       Text(
-                                        'Wi-Fi Direct',
+                                        'Wi-Fi Direct Link',
                                         style: TextStyle(
                                           color: isDark ? Colors.white : const Color(0xFF0F172A),
                                           fontSize: 14,
@@ -371,7 +427,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
 
                         Center(
                           child: Text(
-                            'Make sure BUDDY is powered on and within 10m range',
+                            'Ensure phone and laptop are connected to the same Wi-Fi network',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),

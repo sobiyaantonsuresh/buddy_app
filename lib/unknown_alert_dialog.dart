@@ -23,11 +23,13 @@ class UnknownAlertService {
 
           if (data['status'] == 'alert' && data['image'] != null) {
             _isDialogOpen = true;
-            _showEnrollDialog(
-              context,
-              data['image'],
-              data['time'] ?? 'Just now',
-            );
+            if (context.mounted) {
+              _showEnrollDialog(
+                context,
+                data['image'],
+                data['time'] ?? 'Just now',
+              );
+            }
           }
         }
       } catch (e) {
@@ -38,6 +40,7 @@ class UnknownAlertService {
 
   static void stopListening() {
     _timer?.cancel();
+    _isDialogOpen = false;
   }
 
   static void _showEnrollDialog(BuildContext context, String base64Image, String timestamp) {
@@ -49,8 +52,8 @@ class UnknownAlertService {
       builder: (ctx) {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: const [
+          title: const Row(
+            children: [
               Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
               SizedBox(width: 8),
               Text("Unknown Face Alert", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -72,6 +75,12 @@ class UnknownAlertService {
                     height: 180,
                     width: double.infinity,
                     fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      height: 180,
+                      color: Colors.grey.shade900,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.broken_image, color: Colors.white54, size: 40),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 15),
@@ -89,9 +98,10 @@ class UnknownAlertService {
           ),
           actions: [
             TextButton(
-              onPressed: () {
+              onPressed: () async {
                 _isDialogOpen = false;
                 Navigator.of(ctx).pop();
+                await _clearAlertOnBackend();
               },
               child: const Text("Dismiss", style: TextStyle(color: Colors.grey)),
             ),
@@ -103,10 +113,20 @@ class UnknownAlertService {
               onPressed: () async {
                 final enteredName = nameController.text.trim();
                 if (enteredName.isNotEmpty) {
-                  await _sendEnrollment(enteredName);
+                  await _sendEnrollment(enteredName, base64Image);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('$enteredName successfully registered!'),
+                        backgroundColor: const Color(0xFF27AE60),
+                      ),
+                    );
+                  }
                 }
                 _isDialogOpen = false;
-                Navigator.of(ctx).pop();
+                if (ctx.mounted) {
+                  Navigator.of(ctx).pop();
+                }
               },
               child: const Text("Add Person"),
             ),
@@ -116,13 +136,24 @@ class UnknownAlertService {
     );
   }
 
-  static Future<void> _sendEnrollment(String name) async {
+  static Future<void> _sendEnrollment(String name, String base64Image) async {
     try {
       await http.post(
         Uri.parse('$baseUrl/api/enroll_unknown_person'),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"name": name}),
-      );
-    } catch (e) {}
+        body: jsonEncode({
+          "name": name,
+          "image": base64Image,
+        }),
+      ).timeout(const Duration(seconds: 4));
+    } catch (_) {}
+  }
+
+  static Future<void> _clearAlertOnBackend() async {
+    try {
+      await http.post(
+        Uri.parse('$baseUrl/api/clear_unknown_alert'),
+      ).timeout(const Duration(seconds: 2));
+    } catch (_) {}
   }
 }

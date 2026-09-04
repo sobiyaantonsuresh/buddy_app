@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'home_screen.dart';
 import 'control_screen.dart';
 import 'camera_screen.dart';
@@ -18,15 +21,86 @@ class ScreenVoice extends StatefulWidget {
   State<ScreenVoice> createState() => _ScreenVoiceState();
 }
 
-class _ScreenVoiceState extends State<ScreenVoice> {
-  int _selectedNavIndex = 0; // Active state
-  bool _isListening = true;
+class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStateMixin {
+  int _selectedNavIndex = 0;
+  bool _isListening = false;
+  bool _isProcessing = false;
   String _userCommand = '"Buddy, scan for any unregistered guests in the yard."';
   String _buddyResponse = '"Starting yard scan now. Will alert you if unknown movement is found."';
 
-  void _handleQuickCommand(String command) {
+  static const String _baseUrl = "http://192.168.8.192:5000";
+  Timer? _clockTimer;
+  String _currentTimeString = '';
+
+  late AnimationController _animController;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateClock();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
+
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    _animController.dispose();
+    super.dispose();
+  }
+
+  void _updateClock() {
+    final now = DateTime.now();
+    final hour = now.hour % 12 == 0 ? 12 : now.hour % 12;
+    final minute = now.minute.toString().padLeft(2, '0');
+    final period = now.hour >= 12 ? 'PM' : 'AM';
+    if (mounted) {
+      setState(() {
+        _currentTimeString = '$hour:$minute $period';
+      });
+    }
+  }
+
+  Future<void> _handleCommand(String command) async {
     setState(() {
       _userCommand = '"Buddy, $command."';
+      _isProcessing = true;
+      _buddyResponse = '"Processing command..."';
+    });
+
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/api/control/voice_command'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'command': command}),
+      ).timeout(const Duration(seconds: 4));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          setState(() {
+            _buddyResponse = '"${data['response'] ?? 'Command executed successfully.'}"';
+          });
+        }
+      } else {
+        _fallbackResponse(command);
+      }
+    } catch (_) {
+      _fallbackResponse(command);
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
+  void _fallbackResponse(String command) {
+    if (!mounted) return;
+    setState(() {
       if (command == 'Come here') {
         _buddyResponse = '"Navigating towards your coordinates now."';
       } else if (command == 'Sit') {
@@ -35,6 +109,8 @@ class _ScreenVoiceState extends State<ScreenVoice> {
         _buddyResponse = '"Starting perimeter security sweep."';
       } else if (command == 'Follow me') {
         _buddyResponse = '"Target lock acquired. Following escort routine."';
+      } else {
+        _buddyResponse = '"Command acknowledged. Executing requested action."';
       }
     });
   }
@@ -96,7 +172,7 @@ class _ScreenVoiceState extends State<ScreenVoice> {
             constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
               children: [
-                // Top Status Bar with Back Button & Theme Toggle
+                // Top Status Bar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(
@@ -114,9 +190,9 @@ class _ScreenVoiceState extends State<ScreenVoice> {
                             onPressed: () => Navigator.maybePop(context),
                           ),
                           Text(
-                            '9:41',
+                            _currentTimeString.isEmpty ? '...' : _currentTimeString,
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
@@ -192,57 +268,68 @@ class _ScreenVoiceState extends State<ScreenVoice> {
 
                         // Voice Pulse Visualizer
                         Center(
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Container(
-                                width: 130,
-                                height: 130,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: const Color(0xFF2F80FF).withValues(alpha: 0.15),
-                                ),
-                              ),
-                              Container(
-                                width: 92,
-                                height: 92,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: isDark ? const Color(0xFF162033) : Colors.white,
-                                  border: Border.all(
-                                    width: 2.5,
-                                    color: const Color(0xFF2F80FF),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFF2F80FF).withValues(alpha: 0.35),
-                                      blurRadius: 16,
-                                      spreadRadius: 2,
-                                    )
+                          child: AnimatedBuilder(
+                            animation: _animController,
+                            builder: (context, child) {
+                              final scale = _isListening ? 1.0 + (_animController.value * 0.15) : 1.0;
+                              return Transform.scale(
+                                scale: scale,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Container(
+                                      width: 130,
+                                      height: 130,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: const Color(0xFF2F80FF).withValues(alpha: _isListening ? 0.25 : 0.1),
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 92,
+                                      height: 92,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isDark ? const Color(0xFF162033) : Colors.white,
+                                        border: Border.all(
+                                          width: 2.5,
+                                          color: const Color(0xFF2F80FF),
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF2F80FF).withValues(alpha: 0.35),
+                                            blurRadius: 16,
+                                            spreadRadius: 2,
+                                          )
+                                        ],
+                                      ),
+                                      child: const Icon(
+                                        Icons.graphic_eq_rounded,
+                                        color: Color(0xFF2F80FF),
+                                        size: 42,
+                                      ),
+                                    ),
                                   ],
                                 ),
-                                child: const Icon(
-                                  Icons.graphic_eq_rounded,
-                                  color: Color(0xFF2F80FF),
-                                  size: 42,
-                                ),
-                              ),
-                            ],
+                              );
+                            },
                           ),
                         ),
                         const SizedBox(height: 12),
 
                         Text(
-                          _isListening ? 'Listening...' : 'Tap Mic to Speak',
+                          _isProcessing
+                              ? 'Executing Command...'
+                              : (_isListening ? 'Listening on Robot Mic...' : 'Tap Mic or Select Command'),
                           style: const TextStyle(
                             color: Color(0xFF2F80FF),
-                            fontSize: 16,
+                            fontSize: 15,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
                         const SizedBox(height: 16),
 
-                        // Animated Voice Waveform Bars
+                        // Voice Waveform Bars
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -332,6 +419,9 @@ class _ScreenVoiceState extends State<ScreenVoice> {
                             setState(() {
                               _isListening = !_isListening;
                             });
+                            if (_isListening) {
+                              _handleCommand('Listen for voice triggers');
+                            }
                           },
                           child: Container(
                             width: 60,
@@ -348,7 +438,7 @@ class _ScreenVoiceState extends State<ScreenVoice> {
                               ],
                             ),
                             child: Icon(
-                              _isListening ? Icons.mic : Icons.mic_off,
+                              _isListening ? Icons.mic : Icons.mic_none,
                               color: Colors.white,
                               size: 28,
                             ),
@@ -416,7 +506,7 @@ class _ScreenVoiceState extends State<ScreenVoice> {
           fontWeight: FontWeight.w600,
         ),
       ),
-      onPressed: () => _handleQuickCommand(label),
+      onPressed: _isProcessing ? null : () => _handleCommand(label),
     );
   }
 

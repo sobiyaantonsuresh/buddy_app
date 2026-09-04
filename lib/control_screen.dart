@@ -1,5 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'home_screen.dart';
 import 'camera_screen.dart';
 import 'activity_screen.dart';
@@ -27,10 +30,14 @@ class _ScreenControlState extends State<ScreenControl> {
   bool _headlightOn = true;
   bool _nightVision = false;
 
-  // PUBG-Style Dynamic 360 Joystick Variables
+  static const String _baseUrl = "http://192.168.8.192:5000";
+  final String _videoFeedUrl = "$_baseUrl/video_call";
+
+  // 360 Analog Joystick Variables
   Offset _joystickKnob = Offset.zero;
   final double _joystickRadius = 55.0;
   String _currentDirection = 'STANDBY';
+  DateTime _lastCommandSent = DateTime.now();
 
   void _onBottomNavTapped(int index) {
     if (index == _selectedNavIndex) return;
@@ -80,6 +87,28 @@ class _ScreenControlState extends State<ScreenControl> {
     }
   }
 
+  // Send movement commands to Python / ROS 2 backend
+  Future<void> _sendMoveCommand(String direction, double linear, double angular) async {
+    // Throttle network requests to once every 120ms to prevent flooding
+    if (DateTime.now().difference(_lastCommandSent).inMilliseconds < 120 && direction != 'STOP') {
+      return;
+    }
+    _lastCommandSent = DateTime.now();
+
+    try {
+      await http.post(
+        Uri.parse('$_baseUrl/api/control/move'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'direction': direction,
+          'linear': linear,
+          'angular': angular,
+          'speed': _speedValue,
+        }),
+      ).timeout(const Duration(milliseconds: 500));
+    } catch (_) {}
+  }
+
   void _updateJoystick(Offset localPosition, Size centerSize) {
     final center = Offset(centerSize.width / 2, centerSize.height / 2);
     final delta = localPosition - center;
@@ -98,21 +127,29 @@ class _ScreenControlState extends State<ScreenControl> {
 
     String direction = 'DRIVING';
     final degrees = (angle * 180 / math.pi);
+    double linear = 0.0;
+    double angular = 0.0;
 
     if (degrees >= -45 && degrees <= 45) {
       direction = 'STRAFE RIGHT ▶';
+      angular = -1.0;
     } else if (degrees > 45 && degrees < 135) {
       direction = 'REVERSE ▼';
+      linear = -1.0;
     } else if (degrees >= 135 || degrees <= -135) {
       direction = '◀ STRAFE LEFT';
+      angular = 1.0;
     } else if (degrees > -135 && degrees < -45) {
       direction = 'FORWARD ▲';
+      linear = 1.0;
     }
 
     setState(() {
       _joystickKnob = clampedOffset;
       _currentDirection = direction;
     });
+
+    _sendMoveCommand(direction, linear, angular);
   }
 
   void _resetJoystick() {
@@ -120,9 +157,10 @@ class _ScreenControlState extends State<ScreenControl> {
       _joystickKnob = Offset.zero;
       _currentDirection = 'STANDBY';
     });
+    _sendMoveCommand('STOP', 0.0, 0.0);
   }
 
-  void _triggerAction(String action) {
+  Future<void> _triggerAction(String action) async {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -131,6 +169,14 @@ class _ScreenControlState extends State<ScreenControl> {
         backgroundColor: const Color(0xFF2F80FF),
       ),
     );
+
+    try {
+      await http.post(
+        Uri.parse('$_baseUrl/api/control/action'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': action}),
+      );
+    } catch (_) {}
   }
 
   @override
@@ -153,7 +199,7 @@ class _ScreenControlState extends State<ScreenControl> {
     );
   }
 
-  // 1. LANDSCAPE MODE (Full PUBG-Style Dual Thumb Cockpit)
+  // 1. LANDSCAPE MODE (Full Gaming Cockpit)
   Widget _buildLandscapeGamingCockpit(bool isDark) {
     return Stack(
       children: [
@@ -161,11 +207,15 @@ class _ScreenControlState extends State<ScreenControl> {
         Container(
           width: double.infinity,
           height: double.infinity,
-          decoration: BoxDecoration(
-            color: _nightVision ? const Color(0xFF051C08) : const Color(0xFF0A1128),
-            image: const DecorationImage(
-              image: NetworkImage("https://placehold.co/800x450/0a1128/ffffff.png?text=BUDDY+FPV+LANDSCAPE+STREAM"),
-              fit: BoxFit.cover,
+          color: _nightVision ? const Color(0xFF051C08) : const Color(0xFF0A1128),
+          child: Image.network(
+            _videoFeedUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Center(
+              child: Text(
+                'BUDDY FPV STREAM OFFLINE',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12, fontWeight: FontWeight.bold),
+              ),
             ),
           ),
         ),
@@ -224,11 +274,17 @@ class _ScreenControlState extends State<ScreenControl> {
                   IconButton(
                     icon: Icon(_headlightOn ? Icons.lightbulb : Icons.lightbulb_outline,
                         color: _headlightOn ? Colors.amber : Colors.white70, size: 18),
-                    onPressed: () => setState(() => _headlightOn = !_headlightOn),
+                    onPressed: () {
+                      setState(() => _headlightOn = !_headlightOn);
+                      _triggerAction(_headlightOn ? 'Headlight ON' : 'Headlight OFF');
+                    },
                   ),
                   IconButton(
                     icon: Icon(Icons.nightlight_round, color: _nightVision ? const Color(0xFF27AE60) : Colors.white70, size: 18),
-                    onPressed: () => setState(() => _nightVision = !_nightVision),
+                    onPressed: () {
+                      setState(() => _nightVision = !_nightVision);
+                      _triggerAction(_nightVision ? 'Night Vision ON' : 'Night Vision OFF');
+                    },
                   ),
                 ],
               ),
@@ -243,7 +299,7 @@ class _ScreenControlState extends State<ScreenControl> {
           child: _buildAnalogJoystick(),
         ),
 
-        // Right Thumb: Quick Combat / Dog Action Buttons
+        // Right Thumb: Quick Action Buttons
         Positioned(
           bottom: 20,
           right: 30,
@@ -281,7 +337,7 @@ class _ScreenControlState extends State<ScreenControl> {
     );
   }
 
-  // 2. PORTRAIT MODE (Vertical Phone Screen)
+  // 2. PORTRAIT MODE
   Widget _buildPortraitCockpit(bool isDark) {
     return Center(
       child: ConstrainedBox(
@@ -318,11 +374,17 @@ class _ScreenControlState extends State<ScreenControl> {
                       IconButton(
                         icon: Icon(_headlightOn ? Icons.lightbulb : Icons.lightbulb_outline,
                             color: _headlightOn ? Colors.amber : Colors.white60, size: 20),
-                        onPressed: () => setState(() => _headlightOn = !_headlightOn),
+                        onPressed: () {
+                          setState(() => _headlightOn = !_headlightOn);
+                          _triggerAction(_headlightOn ? 'Headlight ON' : 'Headlight OFF');
+                        },
                       ),
                       IconButton(
                         icon: Icon(Icons.nightlight_round, color: _nightVision ? const Color(0xFF27AE60) : Colors.white60, size: 20),
-                        onPressed: () => setState(() => _nightVision = !_nightVision),
+                        onPressed: () {
+                          setState(() => _nightVision = !_nightVision);
+                          _triggerAction(_nightVision ? 'Night Vision ON' : 'Night Vision OFF');
+                        },
                       ),
                     ],
                   ),
@@ -337,11 +399,15 @@ class _ScreenControlState extends State<ScreenControl> {
                   Container(
                     width: double.infinity,
                     height: double.infinity,
-                    decoration: BoxDecoration(
-                      color: _nightVision ? const Color(0xFF051C08) : const Color(0xFF0A1128),
-                      image: const DecorationImage(
-                        image: NetworkImage("https://placehold.co/600x600/0a1128/ffffff.png?text=BUDDY+FPV+LIVE+VIEWPORT"),
-                        fit: BoxFit.cover,
+                    color: _nightVision ? const Color(0xFF051C08) : const Color(0xFF0A1128),
+                    child: Image.network(
+                      _videoFeedUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Center(
+                        child: Text(
+                          'BUDDY LIVE STREAM OFFLINE',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                   ),
@@ -432,7 +498,7 @@ class _ScreenControlState extends State<ScreenControl> {
     );
   }
 
-  // PUBG 360 Analog Controller Widget
+  // 360 Analog Controller Widget
   Widget _buildAnalogJoystick() {
     return GestureDetector(
       onPanStart: (details) => _updateJoystick(details.localPosition, const Size(140, 140)),

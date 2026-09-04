@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'home_screen.dart';
 import 'control_screen.dart';
 import 'camera_screen.dart';
@@ -26,7 +29,13 @@ class _ScreenActivityState extends State<ScreenActivity> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
-  final List<Map<String, dynamic>> _activities = [
+  static const String _baseUrl = "http://192.168.8.192:5000";
+  Timer? _clockTimer;
+  Timer? _pollingTimer;
+  String _currentTimeString = '';
+  bool _isLoading = false;
+
+  List<Map<String, dynamic>> _activities = [
     {
       'id': 'patrol',
       'title': 'Patrol Started — Route Alpha',
@@ -75,9 +84,93 @@ class _ScreenActivityState extends State<ScreenActivity> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _updateClock();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
+    _fetchLiveActivities();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchLiveActivities());
+  }
+
+  @override
   void dispose() {
+    _clockTimer?.cancel();
+    _pollingTimer?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _updateClock() {
+    final now = DateTime.now();
+    final hour = now.hour % 12 == 0 ? 12 : now.hour % 12;
+    final minute = now.minute.toString().padLeft(2, '0');
+    final period = now.hour >= 12 ? 'PM' : 'AM';
+    if (mounted) {
+      setState(() {
+        _currentTimeString = '$hour:$minute $period';
+      });
+    }
+  }
+
+  Future<void> _fetchLiveActivities() {
+    return _fetchLogsFromApi();
+  }
+
+  Future<void> _fetchLogsFromApi() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/api/activities'))
+          .timeout(const Duration(seconds: 3));
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is List) {
+          final List<Map<String, dynamic>> parsedList = [];
+          for (var item in decoded) {
+            parsedList.add({
+              'id': item['id'] ?? 'status',
+              'title': item['title'] ?? 'System Event',
+              'desc': item['desc'] ?? '',
+              'time': item['time'] ?? _currentTimeString,
+              'category': item['category'] ?? 'System',
+              'icon': _getCategoryIcon(item['category']),
+              'color': _getCategoryColor(item['category']),
+            });
+          }
+          if (mounted && parsedList.isNotEmpty) {
+            setState(() {
+              _activities = parsedList;
+            });
+          }
+        }
+      }
+    } catch (_) {
+      // Retains default logs if API is unreachable
+    }
+  }
+
+  IconData _getCategoryIcon(dynamic category) {
+    switch (category) {
+      case 'Patrols':
+        return Icons.security_rounded;
+      case 'Alerts':
+        return Icons.warning_amber_rounded;
+      case 'Detections':
+        return Icons.face_retouching_natural_rounded;
+      default:
+        return Icons.power_settings_new_rounded;
+    }
+  }
+
+  Color _getCategoryColor(dynamic category) {
+    switch (category) {
+      case 'Alerts':
+        return const Color(0xFFEB5757);
+      case 'Detections':
+        return const Color(0xFF27AE60);
+      default:
+        return const Color(0xFF2F80FF);
+    }
   }
 
   void _handleActivityTap(String id) {
@@ -208,9 +301,9 @@ class _ScreenActivityState extends State<ScreenActivity> {
                             onPressed: () => Navigator.maybePop(context),
                           ),
                           Text(
-                            '9:41',
+                            _currentTimeString.isEmpty ? '...' : _currentTimeString,
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
@@ -239,181 +332,185 @@ class _ScreenActivityState extends State<ScreenActivity> {
 
                 // Main Scrollable Area
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Title
-                        Text(
-                          'Activity Log',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Comprehensive robotic telemetry & quick logs',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Search Field
-                        Container(
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF162033) : Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                  child: RefreshIndicator(
+                    onRefresh: _fetchLiveActivities,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Title
+                          Text(
+                            'Activity Log',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
                             ),
                           ),
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (value) => setState(() => _searchQuery = value),
-                            style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 13),
-                            decoration: InputDecoration(
-                              hintText: 'Search historical events...',
-                              hintStyle: TextStyle(
-                                color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
-                                fontSize: 13,
-                              ),
-                              prefixIcon: Icon(
-                                Icons.search_rounded,
-                                size: 20,
-                                color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Comprehensive robotic telemetry & quick logs',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
+                          const SizedBox(height: 16),
 
-                        // Filter Chips
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            _buildFilterChip('All', isDark),
-                            _buildFilterChip('Detections', isDark),
-                            _buildFilterChip('Patrols', isDark),
-                            _buildFilterChip('Alerts', isDark),
-                            _buildFilterChip('System', isDark),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Interactive Activity List Items
-                        if (filteredActivities.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 40),
-                            child: Center(
-                              child: Text(
-                                'No matching activity logs found.',
-                                style: TextStyle(
-                                  color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                          // Search Field
+                          Container(
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF162033) : Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                              ),
+                            ),
+                            child: TextField(
+                              controller: _searchController,
+                              onChanged: (value) => setState(() => _searchQuery = value),
+                              style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 13),
+                              decoration: InputDecoration(
+                                hintText: 'Search historical events...',
+                                hintStyle: TextStyle(
+                                  color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
                                   fontSize: 13,
                                 ),
+                                prefixIcon: Icon(
+                                  Icons.search_rounded,
+                                  size: 20,
+                                  color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                                ),
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(vertical: 12),
                               ),
                             ),
-                          )
-                        else
-                          ListView.separated(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: filteredActivities.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 8),
-                            itemBuilder: (context, index) {
-                              final item = filteredActivities[index];
-                              return GestureDetector(
-                                onTap: () => _handleActivityTap(item['id'] as String),
-                                child: Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF162033) : Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          color: isDark ? const Color(0xFF08111F) : const Color(0xFFF1F5F9),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(width: 1.2, color: item['color'] as Color),
-                                        ),
-                                        child: Icon(item['icon'] as IconData, size: 20, color: item['color'] as Color),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                              children: [
-                                                Expanded(
-                                                  child: Text(
-                                                    item['title'] as String,
-                                                    style: TextStyle(
-                                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                                      fontSize: 13,
-                                                      fontWeight: FontWeight.w700,
-                                                    ),
-                                                    overflow: TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  item['time'] as String,
-                                                  style: TextStyle(
-                                                    color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
-                                                    fontSize: 10,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Row(
-                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                              children: [
-                                                Expanded(
-                                                  child: Text(
-                                                    item['desc'] as String,
-                                                    style: TextStyle(
-                                                      color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                                      fontSize: 11,
-                                                    ),
-                                                    overflow: TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                                Icon(
-                                                  Icons.arrow_forward_ios_rounded,
-                                                  size: 11,
-                                                  color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Filter Chips
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              _buildFilterChip('All', isDark),
+                              _buildFilterChip('Detections', isDark),
+                              _buildFilterChip('Patrols', isDark),
+                              _buildFilterChip('Alerts', isDark),
+                              _buildFilterChip('System', isDark),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Interactive Activity List Items
+                          if (filteredActivities.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 40),
+                              child: Center(
+                                child: Text(
+                                  'No matching activity logs found.',
+                                  style: TextStyle(
+                                    color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                                    fontSize: 13,
                                   ),
                                 ),
-                              );
-                            },
-                          ),
-                        const SizedBox(height: 20),
-                      ],
+                              ),
+                            )
+                          else
+                            ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: filteredActivities.length,
+                              separatorBuilder: (_, _) => const SizedBox(height: 8),
+                              itemBuilder: (context, index) {
+                                final item = filteredActivities[index];
+                                return GestureDetector(
+                                  onTap: () => _handleActivityTap(item['id'] as String),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: isDark ? const Color(0xFF162033) : Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 40,
+                                          height: 40,
+                                          decoration: BoxDecoration(
+                                            color: isDark ? const Color(0xFF08111F) : const Color(0xFFF1F5F9),
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(width: 1.2, color: item['color'] as Color),
+                                          ),
+                                          child: Icon(item['icon'] as IconData, size: 20, color: item['color'] as Color),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      item['title'] as String,
+                                                      style: TextStyle(
+                                                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                        fontSize: 13,
+                                                        fontWeight: FontWeight.w700,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                    item['time'] as String,
+                                                    style: TextStyle(
+                                                      color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
+                                                      fontSize: 10,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      item['desc'] as String,
+                                                      style: TextStyle(
+                                                        color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                                                        fontSize: 11,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                  Icon(
+                                                    Icons.arrow_forward_ios_rounded,
+                                                    size: 11,
+                                                    color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          const SizedBox(height: 20),
+                        ],
+                      ),
                     ),
                   ),
                 ),

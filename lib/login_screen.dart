@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'home_screen.dart';
 
 class BuddyLoginScreen extends StatefulWidget {
@@ -19,6 +21,9 @@ class _BuddyLoginScreenState extends State<BuddyLoginScreen> {
   final TextEditingController _emailController = TextEditingController(text: 'admin@buddysecurity.com');
   final TextEditingController _passwordController = TextEditingController(text: 'password123');
   bool _obscurePassword = true;
+  bool _isLoading = false;
+
+  static const String _baseUrl = "http://192.168.8.192:5000";
 
   @override
   void dispose() {
@@ -27,17 +32,80 @@ class _BuddyLoginScreenState extends State<BuddyLoginScreen> {
     super.dispose();
   }
 
-  void _goToHomeScreen() {
-    FocusScope.of(context).unfocus();
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ScreenHome(
-          isDarkMode: widget.isDarkMode,
-          onThemeToggle: widget.onThemeToggle,
+  Future<void> _handleLogin() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter both email and password.'),
+          backgroundColor: Colors.redAccent,
         ),
-      ),
-    );
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    FocusScope.of(context).unfocus();
+
+    bool loginSuccess = false;
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+        }),
+      ).timeout(const Duration(seconds: 3));
+
+      if (response.statusCode == 200) {
+        loginSuccess = true;
+      } else {
+        final data = jsonDecode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(data['message'] ?? 'Invalid credentials'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      // Offline fallback verification for development testing
+      if ((email == 'admin@buddysecurity.com' && password == 'password123') ||
+          (email == 'sobiya@buddy.com' && password == 'sobiya123')) {
+        loginSuccess = true;
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Network error. Check Wi-Fi or credentials.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+
+    if (loginSuccess && mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ScreenHome(
+            isDarkMode: widget.isDarkMode,
+            onThemeToggle: widget.onThemeToggle,
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -104,6 +172,7 @@ class _BuddyLoginScreenState extends State<BuddyLoginScreen> {
                   const SizedBox(height: 36),
                   TextField(
                     controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
                     style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                     decoration: InputDecoration(
                       labelText: 'Email Address',
@@ -161,16 +230,26 @@ class _BuddyLoginScreenState extends State<BuddyLoginScreen> {
                         elevation: 4,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      onPressed: _goToHomeScreen,
-                      child: const Text(
-                        'Sign In',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                      ),
+                      onPressed: _isLoading ? null : _handleLogin,
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                            )
+                          : const Text(
+                              'Sign In',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                            ),
                     ),
                   ),
                   const SizedBox(height: 24),
                   GestureDetector(
-                    onTap: _goToHomeScreen,
+                    onTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Contact Admin to create a new companion profile.')),
+                      );
+                    },
                     child: Text.rich(
                       TextSpan(
                         children: [

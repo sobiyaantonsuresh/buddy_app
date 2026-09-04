@@ -1,5 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 class ScreenHousehold extends StatefulWidget {
@@ -18,8 +21,14 @@ class ScreenHousehold extends StatefulWidget {
 
 class _ScreenHouseholdState extends State<ScreenHousehold> {
   final ImagePicker _picker = ImagePicker();
+  static const String _baseUrl = "http://192.168.8.192:5000";
 
-  final List<Map<String, dynamic>> _members = [
+  Timer? _clockTimer;
+  Timer? _pollingTimer;
+  String _currentTimeString = '';
+  bool _isUploading = false;
+
+  List<Map<String, dynamic>> _members = [
     {
       'name': 'Sobiya',
       'role': 'Owner',
@@ -42,6 +51,83 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
       'imageBytes': null,
     },
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _updateClock();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
+    _fetchHouseholdMembers();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 6), (_) => _fetchHouseholdMembers());
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _updateClock() {
+    final now = DateTime.now();
+    final hour = now.hour % 12 == 0 ? 12 : now.hour % 12;
+    final minute = now.minute.toString().padLeft(2, '0');
+    final period = now.hour >= 12 ? 'PM' : 'AM';
+    if (mounted) {
+      setState(() {
+        _currentTimeString = '$hour:$minute $period';
+      });
+    }
+  }
+
+  Future<void> _fetchHouseholdMembers() async {
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/api/get_household_members')).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is List && decoded.isNotEmpty) {
+          final List<Map<String, dynamic>> fetched = [];
+          for (var item in decoded) {
+            Uint8List? bytes;
+            if (item['image_base64'] != null && item['image_base64'].toString().isNotEmpty) {
+              try {
+                bytes = base64Decode(item['image_base64']);
+              } catch (_) {}
+            }
+            fetched.add({
+              'name': item['name'] ?? 'Unknown',
+              'role': item['role'] ?? 'Member',
+              'status': item['status'] ?? 'RECOGNIZED',
+              'color': item['status'] == 'RECOGNIZED' ? const Color(0xFF27AE60) : const Color(0xFFF2994A),
+              'imageBytes': bytes,
+            });
+          }
+          if (mounted) {
+            setState(() => _members = fetched);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _registerFaceOnBackend(String name, String role, Uint8List? imageBytes) async {
+    try {
+      String? base64Img;
+      if (imageBytes != null) {
+        base64Img = base64Encode(imageBytes);
+      }
+
+      await http.post(
+        Uri.parse('$_baseUrl/api/register_face'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'name': name,
+          'role': role,
+          'image': base64Img,
+        }),
+      ).timeout(const Duration(seconds: 4));
+    } catch (_) {}
+  }
 
   void _showAddMemberDialog() {
     final nameController = TextEditingController();
@@ -104,16 +190,16 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
                           borderRadius: BorderRadius.circular(10),
                           child: Image.memory(capturedImageBytes!, fit: BoxFit.cover, width: double.infinity),
                         )
-                      : Column(
+                      : const Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.face_retouching_natural_rounded,
                               size: 48,
                               color: Colors.white54,
                             ),
-                            const SizedBox(height: 8),
-                            const Text(
+                            SizedBox(height: 8),
+                            Text(
                               'Take a photo or choose from gallery',
                               style: TextStyle(
                                 color: Colors.white70,
@@ -126,7 +212,7 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
                 ),
                 const SizedBox(height: 12),
 
-                // Dual Image Pick Action Buttons (Camera & Gallery)
+                // Dual Image Pick Action Buttons
                 Row(
                   children: [
                     Expanded(
@@ -248,33 +334,52 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
                     ),
-                    onPressed: () {
-                      if (nameController.text.trim().isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Please enter a member name.')),
-                        );
-                        return;
-                      }
+                    onPressed: _isUploading
+                        ? null
+                        : () async {
+                            final enteredName = nameController.text.trim();
+                            if (enteredName.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Please enter a member name.')),
+                              );
+                              return;
+                            }
 
-                      setState(() {
-                        _members.add({
-                          'name': nameController.text.trim(),
-                          'role': selectedRole,
-                          'status': capturedImageBytes != null ? 'RECOGNIZED' : 'UNREGISTERED',
-                          'color': capturedImageBytes != null ? const Color(0xFF27AE60) : const Color(0xFFF2994A),
-                          'imageBytes': capturedImageBytes,
-                        });
-                      });
+                            setModalState(() => _isUploading = true);
 
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('${nameController.text.trim()} added to Household!'),
-                          backgroundColor: const Color(0xFF27AE60),
-                        ),
-                      );
-                    },
-                    child: const Text('SAVE & REGISTER FACE', style: TextStyle(fontWeight: FontWeight.w800)),
+                            // Send to Python Flask & AI database
+                            await _registerFaceOnBackend(enteredName, selectedRole, capturedImageBytes);
+
+                            if (mounted) {
+                              setState(() {
+                                _members.add({
+                                  'name': enteredName,
+                                  'role': selectedRole,
+                                  'status': capturedImageBytes != null ? 'RECOGNIZED' : 'UNREGISTERED',
+                                  'color': capturedImageBytes != null ? const Color(0xFF27AE60) : const Color(0xFFF2994A),
+                                  'imageBytes': capturedImageBytes,
+                                });
+                              });
+                            }
+
+                            setModalState(() => _isUploading = false);
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('$enteredName registered into Face Database!'),
+                                  backgroundColor: const Color(0xFF27AE60),
+                                ),
+                              );
+                            }
+                          },
+                    child: _isUploading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Text('SAVE & REGISTER FACE', style: TextStyle(fontWeight: FontWeight.w800)),
                   ),
                 ),
               ],
@@ -314,9 +419,9 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
                             onPressed: () => Navigator.maybePop(context),
                           ),
                           Text(
-                            '9:41',
+                            _currentTimeString.isEmpty ? '...' : _currentTimeString,
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
@@ -345,265 +450,203 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
 
                 // Main Content Area
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Household Profile',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Manage recognized family and permissions',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Owner Profile Card
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF162033) : Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                  child: RefreshIndicator(
+                    onRefresh: _fetchHouseholdMembers,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Household Profile',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
                             ),
                           ),
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 26,
-                                backgroundColor: const Color(0xFF2F80FF).withValues(alpha: 0.2),
-                                child: const Icon(Icons.person, color: Color(0xFF2F80FF), size: 30),
-                              ),
-                              const SizedBox(width: 14),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text(
-                                        'Sobiya',
-                                        style: TextStyle(
-                                          color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF2F80FF),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: const Text(
-                                          'OWNER',
-                                          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'Connected since Jan 2026',
-                                    style: TextStyle(
-                                      color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                          const SizedBox(height: 4),
+                          Text(
+                            'Manage recognized family and permissions',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 20),
+                          const SizedBox(height: 16),
 
-                        // Members List Section
-                        Text(
-                          'HOUSEHOLD MEMBERS',
-                          style: TextStyle(
-                            color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.8,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-
-                        ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _members.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final m = _members[index];
-                            final Uint8List? imgBytes = m['imageBytes'] as Uint8List?;
-
-                            return Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF162033) : Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Row(
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 20,
-                                        backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
-                                        backgroundImage: imgBytes != null ? MemoryImage(imgBytes) : null,
-                                        child: imgBytes == null
-                                            ? Icon(Icons.person_outline, size: 20, color: isDark ? Colors.white70 : Colors.black87)
-                                            : null,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            m['name'] as String,
-                                            style: TextStyle(
-                                              color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          Text(
-                                            m['role'] as String,
-                                            style: TextStyle(
-                                              color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                              fontSize: 11,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  Row(
-                                    children: [
-                                      Text(
-                                        m['status'] as String,
-                                        style: TextStyle(
-                                          color: m['color'] as Color,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Container(
-                                        width: 6,
-                                        height: 6,
-                                        decoration: BoxDecoration(color: m['color'] as Color, shape: BoxShape.circle),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Add Member Trigger Button
-                        GestureDetector(
-                          onTap: _showAddMemberDialog,
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          // Owner Profile Card
+                          Container(
+                            padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF2F80FF), width: 1.5),
+                              color: isDark ? const Color(0xFF162033) : Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                              ),
                             ),
-                            alignment: Alignment.center,
-                            child: const Text(
-                              'Add New Member +',
-                              style: TextStyle(color: Color(0xFF2F80FF), fontSize: 14, fontWeight: FontWeight.w700),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 26,
+                                  backgroundColor: const Color(0xFF2F80FF).withValues(alpha: 0.2),
+                                  child: const Icon(Icons.person, color: Color(0xFF2F80FF), size: 30),
+                                ),
+                                const SizedBox(width: 14),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          'Sobiya',
+                                          style: TextStyle(
+                                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF2F80FF),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: const Text(
+                                            'OWNER',
+                                            style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Connected since Jan 2026',
+                                      style: TextStyle(
+                                        color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 20),
+                          const SizedBox(height: 20),
 
-                        // Timeline Section
-                        Text(
-                          'DETECTION TIMELINE',
-                          style: TextStyle(
-                            color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.8,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF162033) : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                          // Members List Section
+                          Text(
+                            'HOUSEHOLD MEMBERS',
+                            style: TextStyle(
+                              color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.8,
                             ),
                           ),
-                          child: Column(
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'Sobiya (Mood: Happy)',
-                                    style: TextStyle(
-                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                      fontSize: 13,
-                                    ),
+                          const SizedBox(height: 10),
+
+                          ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _members.length,
+                            separatorBuilder: (_, _) => const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final m = _members[index];
+                              final Uint8List? imgBytes = m['imageBytes'] as Uint8List?;
+
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF162033) : Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
                                   ),
-                                  Text(
-                                    '08:45 AM',
-                                    style: TextStyle(
-                                      color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                      fontSize: 11,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 20,
+                                          backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                          backgroundImage: imgBytes != null ? MemoryImage(imgBytes) : null,
+                                          child: imgBytes == null
+                                              ? Icon(Icons.person_outline, size: 20, color: isDark ? Colors.white70 : Colors.black87)
+                                              : null,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              m['name'] as String,
+                                              style: TextStyle(
+                                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            Text(
+                                              m['role'] as String,
+                                              style: TextStyle(
+                                                color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                ],
-                              ),
-                              Divider(color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0), height: 16),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'Rayan (Mood: Neutral)',
-                                    style: TextStyle(
-                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                      fontSize: 13,
+                                    Row(
+                                      children: [
+                                        Text(
+                                          m['status'] as String,
+                                          style: TextStyle(
+                                            color: m['color'] as Color,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: BoxDecoration(color: m['color'] as Color, shape: BoxShape.circle),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                  Text(
-                                    'Yesterday',
-                                    style: TextStyle(
-                                      color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                                  ],
+                                ),
+                              );
+                            },
                           ),
-                        ),
-                        const SizedBox(height: 20),
-                      ],
+                          const SizedBox(height: 12),
+
+                          // Add Member Trigger Button
+                          GestureDetector(
+                            onTap: _showAddMemberDialog,
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFF2F80FF), width: 1.5),
+                              ),
+                              alignment: Alignment.center,
+                              child: const Text(
+                                'Add New Member +',
+                                style: TextStyle(color: Color(0xFF2F80FF), fontSize: 14, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                        ],
+                      ),
                     ),
                   ),
                 ),
