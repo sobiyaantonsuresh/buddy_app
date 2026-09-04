@@ -40,31 +40,11 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     },
     {
       'id': '2',
-      'title': 'WARNING: Battery Low (15%)',
-      'desc': 'Robot returning to charging dock shortly.',
-      'time': '12m ago',
-      'isUnread': true,
-      'category': 'System',
-      'hasAction': true,
-      'actionText': 'Dismiss',
-      'actionType': 'dismiss',
-    },
-    {
-      'id': '3',
-      'title': 'INFO: Patrol Route Updated',
-      'desc': 'Route Alpha synced successfully via cloud.',
-      'time': '1h ago',
+      'title': 'INFO: Patrol Route Active',
+      'desc': 'Perimeter Alpha monitoring running normally.',
+      'time': '15m ago',
       'isUnread': false,
       'category': 'System',
-      'hasAction': false,
-    },
-    {
-      'id': '4',
-      'title': 'ARRIVED: Sobiya arrived home',
-      'desc': 'Owner recognized successfully with high mood index.',
-      'time': '2h ago',
-      'isUnread': false,
-      'category': 'Info',
       'hasAction': false,
     },
   ];
@@ -75,7 +55,7 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     _updateClock();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
     _fetchLiveNotifications();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchLiveNotifications());
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) => _fetchLiveNotifications());
   }
 
   @override
@@ -99,10 +79,13 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
 
   Future<void> _fetchLiveNotifications() async {
     try {
-      final res = await http.get(Uri.parse('$_baseUrl/api/notifications')).timeout(const Duration(seconds: 3));
+      final res = await http
+          .get(Uri.parse('$_baseUrl/api/notifications'))
+          .timeout(const Duration(seconds: 2));
+
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
-        if (decoded is List && decoded.isNotEmpty) {
+        if (decoded is List && mounted) {
           final List<Map<String, dynamic>> fetched = [];
           for (var item in decoded) {
             fetched.add({
@@ -113,18 +96,14 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
               'isUnread': item['isUnread'] ?? true,
               'category': item['category'] ?? 'Security',
               'hasAction': item['hasAction'] ?? false,
-              'actionText': item['actionText'] ?? 'View',
+              'actionText': item['actionText'] ?? 'View Stream',
               'actionType': item['actionType'] ?? 'camera',
             });
           }
-          if (mounted) {
-            setState(() => _notificationItems = fetched);
-          }
+          setState(() => _notificationItems = fetched);
         }
       }
-    } catch (_) {
-      // Retains existing notifications if network is unreachable
-    }
+    } catch (_) {}
   }
 
   Future<void> _markAllAsRead() async {
@@ -135,12 +114,16 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     });
 
     try {
-      await http.post(Uri.parse('$_baseUrl/api/notifications/read_all'));
+      await http.post(Uri.parse('$_baseUrl/api/clear_unknown_alert'));
     } catch (_) {}
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All notifications marked as read.')),
+        const SnackBar(
+          content: Text('All notifications marked as read.'),
+          backgroundColor: Color(0xFF27AE60),
+          duration: Duration(seconds: 1),
+        ),
       );
     }
   }
@@ -157,17 +140,12 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
         ),
       );
     } else if (actionType == 'dismiss') {
-      final dismissedItem = _notificationItems[index];
       setState(() {
         _notificationItems.removeAt(index);
       });
 
       try {
-        await http.post(
-          Uri.parse('$_baseUrl/api/notifications/dismiss'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'id': dismissedItem['id']}),
-        );
+        await http.post(Uri.parse('$_baseUrl/api/clear_unknown_alert'));
       } catch (_) {}
     }
   }
@@ -182,13 +160,13 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     }).toList();
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B132B) : const Color(0xFFF8FAFC),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
               children: [
-                // Top Status Bar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(
@@ -234,8 +212,6 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                     ],
                   ),
                 ),
-
-                // Main Content
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: _fetchLiveNotifications,
@@ -245,7 +221,6 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Header with Mark All Read
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             crossAxisAlignment: CrossAxisAlignment.center,
@@ -280,8 +255,6 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                             ),
                           ),
                           const SizedBox(height: 16),
-
-                          // Filter Chips
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: Row(
@@ -297,8 +270,6 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                             ),
                           ),
                           const SizedBox(height: 16),
-
-                          // Notification Items List
                           if (filteredItems.isEmpty)
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 40),
@@ -317,7 +288,7 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: filteredItems.length,
-                              separatorBuilder: (_, _) => const SizedBox(height: 10),
+                              separatorBuilder: (_, __) => const SizedBox(height: 10),
                               itemBuilder: (context, index) {
                                 final item = filteredItems[index];
                                 final isCritical = item['title'].toString().contains('CRITICAL');
@@ -328,7 +299,9 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                                     color: isDark ? const Color(0xFF162033) : Colors.white,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                                      color: isCritical
+                                          ? const Color(0xFFEB5757).withValues(alpha: 0.5)
+                                          : (isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0)),
                                     ),
                                   ),
                                   child: Column(
@@ -395,14 +368,14 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                                               style: ElevatedButton.styleFrom(
                                                 backgroundColor: isCritical
                                                     ? const Color(0xFFEB5757)
-                                                    : (isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
-                                                foregroundColor: isCritical
-                                                    ? Colors.white
-                                                    : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                                                    : const Color(0xFF2F80FF),
+                                                foregroundColor: Colors.white,
                                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                                                 minimumSize: Size.zero,
                                                 elevation: 0,
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
                                               ),
                                               onPressed: () => _handleAction(item['actionType'] as String, index),
                                               child: Text(

@@ -44,6 +44,10 @@ class _ScreenHomeState extends State<ScreenHome> {
   String _detectedPerson = 'Sobiya';
   String _detectedMood = 'Happy';
 
+  // Unknown face alert buffer
+  bool _hasUnknownAlert = false;
+  String? _latestAlertImage;
+
   @override
   void initState() {
     super.initState();
@@ -52,7 +56,7 @@ class _ScreenHomeState extends State<ScreenHome> {
 
     // Polling live robot telemetry
     _fetchLiveStatus();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) => _fetchLiveStatus());
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) => _fetchLiveStatus());
 
     // Start listening for unknown face alert popups
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -92,6 +96,22 @@ class _ScreenHomeState extends State<ScreenHome> {
             _robotState = data['state'] ?? _robotState;
             _detectedPerson = data['last_face'] ?? _detectedPerson;
             _detectedMood = data['last_emotion'] ?? _detectedMood;
+          });
+        }
+      }
+
+      // Check for unknown person alert and retrieve base64 crop
+      final alertRes = await http.get(Uri.parse('$_baseUrl/api/get_unknown_alert')).timeout(const Duration(seconds: 2));
+      if (alertRes.statusCode == 200) {
+        final alertData = jsonDecode(alertRes.body);
+        if (mounted) {
+          setState(() {
+            if (alertData['status'] == 'alert' && alertData['image'] != null) {
+              _hasUnknownAlert = true;
+              _latestAlertImage = alertData['image'].toString();
+            } else {
+              _hasUnknownAlert = false;
+            }
           });
         }
       }
@@ -181,6 +201,7 @@ class _ScreenHomeState extends State<ScreenHome> {
         builder: (context) => ScreenHousehold(
           isDarkMode: widget.isDarkMode,
           onThemeToggle: widget.onThemeToggle,
+          initialImageBase64: _latestAlertImage,
         ),
       ),
     );
@@ -301,18 +322,19 @@ class _ScreenHomeState extends State<ScreenHome> {
                                 tooltip: 'Notifications',
                                 onPressed: _goToNotificationsScreen,
                               ),
-                              Positioned(
-                                right: 10,
-                                top: 10,
-                                child: Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFEB5757),
-                                    shape: BoxShape.circle,
+                              if (_hasUnknownAlert)
+                                Positioned(
+                                  right: 10,
+                                  top: 10,
+                                  child: Container(
+                                    width: 7,
+                                    height: 7,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFEB5757),
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
                                 ),
-                              ),
                             ],
                           ),
                           IconButton(
@@ -504,54 +526,56 @@ class _ScreenHomeState extends State<ScreenHome> {
                           ),
                           const SizedBox(height: 16),
 
-                          GestureDetector(
-                            onTap: _goToSecurityScreen,
-                            child: Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF162033) : Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: const Color(0xFFEB5757).withValues(alpha: 0.5),
+                          if (_hasUnknownAlert) ...[
+                            GestureDetector(
+                              onTap: _goToSecurityScreen,
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF162033) : Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: const Color(0xFFEB5757).withValues(alpha: 0.5),
+                                  ),
                                 ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Row(
-                                    children: [
-                                      Icon(Icons.circle, color: Color(0xFFEB5757), size: 8),
-                                      SizedBox(width: 8),
-                                      Text(
-                                        'Person Detected | Approaching',
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Row(
+                                      children: [
+                                        Icon(Icons.circle, color: Color(0xFFEB5757), size: 8),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Person Detected | Approaching',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEB5757),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        'ALERT',
                                         style: TextStyle(
                                           color: Colors.white,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
                                         ),
                                       ),
-                                    ],
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFEB5757),
-                                      borderRadius: BorderRadius.circular(6),
                                     ),
-                                    child: const Text(
-                                      'ALERT',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 20),
+                            const SizedBox(height: 20),
+                          ],
 
                           Text(
                             'DETECTION ANALYSIS',
