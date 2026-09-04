@@ -10,6 +10,7 @@ import 'notifications_screen.dart';
 import 'voice_screen.dart';
 import 'login_screen.dart';
 import 'household_screen.dart';
+import 'unknown_alert_dialog.dart';
 
 class ScreenHome extends StatefulWidget {
   final bool isDarkMode;
@@ -27,6 +28,21 @@ class ScreenHome extends StatefulWidget {
 
 class _ScreenHomeState extends State<ScreenHome> {
   int _selectedNavIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Start listening for unknown face alerts as soon as Home screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      UnknownAlertService.startListening(context);
+    });
+  }
+
+  @override
+  void dispose() {
+    UnknownAlertService.stopListening();
+    super.dispose();
+  }
 
   void _onBottomNavTapped(int index) {
     if (index == 0) {
