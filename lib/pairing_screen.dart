@@ -24,7 +24,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
   bool _isConnecting = false;
   String _connectionStatus = 'Ready to pair with BUDDY';
 
-  static const String _baseUrl = "http://192.168.8.192:5000";
+  static const String _baseUrl = "http://10.242.169.228:5000";
   Timer? _clockTimer;
   String _currentTimeString = '';
 
@@ -56,7 +56,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
   Future<void> _connectToRobot(String robotName) async {
     setState(() {
       _isConnecting = true;
-      _connectionStatus = 'Pinging $robotName on 192.168.8.192...';
+      _connectionStatus = 'Pinging $robotName on 10.242.169.228...';
     });
 
     bool isConnected = false;
@@ -102,7 +102,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Cannot reach BUDDY on 192.168.8.192. Ensure laptop Flask is running.'),
+          content: Text('Cannot reach BUDDY on 10.242.169.228. Ensure laptop Flask is running.'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -204,7 +204,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Establish a secure local network link via Wi-Fi Host: 192.168.8.192',
+                          'Establish a secure local network link via Wi-Fi Host: 10.242.169.228',
                           style: TextStyle(
                             color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
                             fontSize: 13,
@@ -327,7 +327,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
                                         ),
                                       ),
                                       Text(
-                                        'Host: 192.168.8.192:5000',
+                                        'Host: 10.242.169.228:5000',
                                         style: TextStyle(
                                           color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
                                           fontSize: 11,

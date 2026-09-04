@@ -26,7 +26,7 @@ class _ScreenCameraState extends State<ScreenCamera> {
   bool _isRecording = false;
   bool _isFlashOn = false;
 
-  static const String _baseUrl = "http://192.168.8.192:5000";
+  static const String _baseUrl = "http://10.242.169.228:5000";
   // Flask MJPEG video feed endpoint
   final String _videoFeedUrl = "$_baseUrl/video_call";
 

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 class UnknownAlertService {
-  static const String baseUrl = "http://192.168.8.192:5000";
+  static const String baseUrl = "http://10.242.169.228:5000";
   static Timer? _timer;
   static bool _isDialogOpen = false;
 

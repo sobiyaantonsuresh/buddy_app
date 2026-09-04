@@ -30,7 +30,7 @@ class _ScreenControlState extends State<ScreenControl> {
   bool _headlightOn = true;
   bool _nightVision = false;
 
-  static const String _baseUrl = "http://192.168.8.192:5000";
+  static const String _baseUrl = "http://10.242.169.228:5000";
   final String _videoFeedUrl = "$_baseUrl/video_call";
 
   // 360 Analog Joystick Variables

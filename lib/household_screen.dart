@@ -21,7 +21,7 @@ class ScreenHousehold extends StatefulWidget {
 
 class _ScreenHouseholdState extends State<ScreenHousehold> {
   final ImagePicker _picker = ImagePicker();
-  static const String _baseUrl = "http://192.168.8.192:5000";
+  static const String _baseUrl = "http://10.242.169.228:5000";
 
   Timer? _clockTimer;
   Timer? _pollingTimer;

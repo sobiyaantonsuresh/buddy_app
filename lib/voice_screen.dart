@@ -28,7 +28,7 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
   String _userCommand = '"Buddy, scan for any unregistered guests in the yard."';
   String _buddyResponse = '"Starting yard scan now. Will alert you if unknown movement is found."';
 
-  static const String _baseUrl = "http://192.168.8.192:5000";
+  static const String _baseUrl = "http://10.242.169.228:5000";
   Timer? _clockTimer;
   String _currentTimeString = '';
 

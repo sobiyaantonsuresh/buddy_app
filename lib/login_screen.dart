@@ -23,7 +23,7 @@ class _BuddyLoginScreenState extends State<BuddyLoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
 
-  static const String _baseUrl = "http://192.168.8.192:5000";
+  static const String _baseUrl = "http://10.242.169.228:5000";
 
   @override
   void dispose() {
