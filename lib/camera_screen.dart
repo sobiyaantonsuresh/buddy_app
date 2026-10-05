@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui_web' as ui_web;
-import 'dart:html' as html;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'camera_web_platform.dart' as camera_web;
 import 'home_screen.dart';
 import 'control_screen.dart';
 import 'activity_screen.dart';
@@ -56,18 +55,7 @@ class _ScreenCameraState extends State<ScreenCamera> {
 
     _viewType = 'video-feed-${DateTime.now().millisecondsSinceEpoch}';
     if (kIsWeb) {
-      ui_web.platformViewRegistry.registerViewFactory(
-        _viewType,
-        (int viewId) {
-          final img = html.ImageElement()
-            ..src = '$_baseUrl/video_call'
-            ..style.width = '100%'
-            ..style.height = '100%'
-            ..style.objectFit = 'cover'
-            ..style.border = 'none';
-          return img;
-        },
-      );
+      camera_web.registerVideoFeedView(_viewType, '$_baseUrl/video_call');
     }
   }
 
@@ -235,14 +223,9 @@ class _ScreenCameraState extends State<ScreenCamera> {
     setState(() {
       _viewType = 'video-feed-${DateTime.now().millisecondsSinceEpoch}';
       if (kIsWeb) {
-        ui_web.platformViewRegistry.registerViewFactory(
+        camera_web.registerVideoFeedView(
           _viewType,
-          (int viewId) => html.ImageElement()
-            ..src =
-                '$_baseUrl/video_call?t=${DateTime.now().millisecondsSinceEpoch}'
-            ..style.width = '100%'
-            ..style.height = '100%'
-            ..style.objectFit = 'cover',
+          '$_baseUrl/video_call?t=${DateTime.now().millisecondsSinceEpoch}',
         );
       }
     });
@@ -350,7 +333,7 @@ class _ScreenCameraState extends State<ScreenCamera> {
                                       horizontal: 12, vertical: 6),
                                 ),
                                 onPressed: () {
-                                  html.window.open(mediaUrl, '_blank');
+                                  camera_web.openInNewTab(mediaUrl);
                                 },
                                 icon: const Icon(Icons.download,
                                     size: 14, color: Colors.white),
