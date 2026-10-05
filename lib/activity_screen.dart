@@ -29,11 +29,11 @@ class _ScreenActivityState extends State<ScreenActivity> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
-  static const String _baseUrl = "http://10.242.169.228:5000";
+  // Correct Laptop Wi-Fi IP and Flask Backend Port
+  static const String _baseUrl = "http://192.168.8.192:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
   String _currentTimeString = '';
-  bool _isLoading = false;
 
   List<Map<String, dynamic>> _activities = [
     {
@@ -119,7 +119,7 @@ class _ScreenActivityState extends State<ScreenActivity> {
   Future<void> _fetchLogsFromApi() async {
     try {
       final response = await http
-          .get(Uri.parse('$_baseUrl/api/activities'))
+          .get(Uri.parse('$_baseUrl/api/notifications'))
           .timeout(const Duration(seconds: 3));
 
       if (response.statusCode == 200) {
@@ -127,14 +127,25 @@ class _ScreenActivityState extends State<ScreenActivity> {
         if (decoded is List) {
           final List<Map<String, dynamic>> parsedList = [];
           for (var item in decoded) {
+            final category = item['category'] ?? 'System';
+
+            String navId = 'status';
+            if (category == 'Patrols') {
+              navId = 'patrol';
+            } else if (category == 'Alerts') {
+              navId = 'alert';
+            } else if (category == 'Detections') {
+              navId = 'emotion';
+            }
+
             parsedList.add({
-              'id': item['id'] ?? 'status',
+              'id': navId,
               'title': item['title'] ?? 'System Event',
               'desc': item['desc'] ?? '',
               'time': item['time'] ?? _currentTimeString,
-              'category': item['category'] ?? 'System',
-              'icon': _getCategoryIcon(item['category']),
-              'color': _getCategoryColor(item['category']),
+              'category': category,
+              'icon': _getCategoryIcon(category),
+              'color': _getCategoryColor(category),
             });
           }
           if (mounted && parsedList.isNotEmpty) {
@@ -145,7 +156,7 @@ class _ScreenActivityState extends State<ScreenActivity> {
         }
       }
     } catch (_) {
-      // Retains default logs if API is unreachable
+      // Keeps fallback logs active if server is temporarily unreachable
     }
   }
 
@@ -340,7 +351,6 @@ class _ScreenActivityState extends State<ScreenActivity> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Title
                           Text(
                             'Activity Log',
                             style: TextStyle(
@@ -404,7 +414,7 @@ class _ScreenActivityState extends State<ScreenActivity> {
                           ),
                           const SizedBox(height: 16),
 
-                          // Interactive Activity List Items
+                          // Activity List Items
                           if (filteredActivities.isEmpty)
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 40),

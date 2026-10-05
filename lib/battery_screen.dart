@@ -18,7 +18,7 @@ class ScreenBattery extends StatefulWidget {
 }
 
 class _ScreenBatteryState extends State<ScreenBattery> {
-  static const String _baseUrl = "http://10.242.169.228:5000";
+  static const String _baseUrl = "http://192.168.8.192:5000";
 
   bool _powerSavingMode = false;
   bool _autoReturnDock = true;
@@ -73,17 +73,27 @@ class _ScreenBatteryState extends State<ScreenBattery> {
   Future<void> _fetchLiveBattery() async {
     try {
       final response = await http
-          .get(Uri.parse('$_baseUrl/api/battery_status'))
+          .get(Uri.parse('$_baseUrl/api/robot_status'))
           .timeout(const Duration(seconds: 3));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (mounted) {
           setState(() {
-            _batteryPercentage = (data['percentage'] as num?)?.toDouble() ?? _batteryPercentage;
-            _batteryState = data['state'] ?? _batteryState;
-            _timeRemaining = data['remaining'] ?? _timeRemaining;
-            _healthStatus = data['health'] ?? _healthStatus;
+            if (data['battery'] != null) {
+              _batteryPercentage = (data['battery'] as num).toDouble();
+            }
+            if (data['battery_state'] != null) {
+              _batteryState = data['battery_state'].toString();
+            } else if (data['status'] != null) {
+              _batteryState = data['status'] == 'online' ? 'Active / Discharging' : 'Standby';
+            }
+            if (data['remaining'] != null) {
+              _timeRemaining = data['remaining'].toString();
+            }
+            if (data['health'] != null) {
+              _healthStatus = data['health'].toString();
+            }
             if (data['power_saving'] != null) {
               _powerSavingMode = data['power_saving'] as bool;
             }
@@ -94,19 +104,19 @@ class _ScreenBatteryState extends State<ScreenBattery> {
         }
       }
     } catch (_) {
-      // Retains current battery metrics when network drops
+      // Network drop aakumbol pazhaya data retain cheyyum
     }
   }
 
   Future<void> _updatePowerSetting(String key, bool value) async {
     try {
       await http.post(
-        Uri.parse('$_baseUrl/api/power_settings'),
+        Uri.parse('$_baseUrl/api/settings/update'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({key: value}),
       );
     } catch (_) {
-      // Retains offline toggling
+      // Offline fallback
     }
   }
 

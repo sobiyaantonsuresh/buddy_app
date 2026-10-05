@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'camera_screen.dart';
@@ -21,33 +23,12 @@ class ScreenNotifications extends StatefulWidget {
 class _ScreenNotificationsState extends State<ScreenNotifications> {
   String _selectedCategory = 'All';
 
-  static const String _baseUrl = "http://10.242.169.228:5000";
+  static const String _baseUrl = kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
   String _currentTimeString = '';
 
-  List<Map<String, dynamic>> _notificationItems = [
-    {
-      'id': '1',
-      'title': 'CRITICAL: Unregistered Person',
-      'desc': 'Unknown target detected at Front Yard perimeter.',
-      'time': 'Just now',
-      'isUnread': true,
-      'category': 'Security',
-      'hasAction': true,
-      'actionText': 'View Stream',
-      'actionType': 'camera',
-    },
-    {
-      'id': '2',
-      'title': 'INFO: Patrol Route Active',
-      'desc': 'Perimeter Alpha monitoring running normally.',
-      'time': '15m ago',
-      'isUnread': false,
-      'category': 'System',
-      'hasAction': false,
-    },
-  ];
+  List<Map<String, dynamic>> _notificationItems = [];
 
   @override
   void initState() {
@@ -55,7 +36,7 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     _updateClock();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
     _fetchLiveNotifications();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) => _fetchLiveNotifications());
+    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) => _fetchLiveNotifications());
   }
 
   @override
@@ -66,18 +47,18 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
   }
 
   void _updateClock() {
+    if (!mounted) return;
     final now = DateTime.now();
     final hour = now.hour % 12 == 0 ? 12 : now.hour % 12;
     final minute = now.minute.toString().padLeft(2, '0');
     final period = now.hour >= 12 ? 'PM' : 'AM';
-    if (mounted) {
-      setState(() {
-        _currentTimeString = '$hour:$minute $period';
-      });
-    }
+    setState(() {
+      _currentTimeString = '$hour:$minute $period';
+    });
   }
 
   Future<void> _fetchLiveNotifications() async {
+    if (!mounted) return;
     try {
       final res = await http
           .get(Uri.parse('$_baseUrl/api/notifications'))
@@ -96,11 +77,15 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
               'isUnread': item['isUnread'] ?? true,
               'category': item['category'] ?? 'Security',
               'hasAction': item['hasAction'] ?? false,
-              'actionText': item['actionText'] ?? 'View Stream',
-              'actionType': item['actionType'] ?? 'camera',
+              'actionText': item['actionText'] ?? 'Register Face',
+              'actionType': item['actionType'] ?? 'enroll',
+              'image': item['image'],
             });
           }
-          setState(() => _notificationItems = fetched);
+
+          if (jsonEncode(_notificationItems) != jsonEncode(fetched)) {
+            setState(() => _notificationItems = fetched);
+          }
         }
       }
     } catch (_) {}
@@ -128,26 +113,127 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     }
   }
 
-  Future<void> _handleAction(String actionType, int index) async {
-    if (actionType == 'camera') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenCamera(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
-    } else if (actionType == 'dismiss') {
-      setState(() {
-        _notificationItems.removeAt(index);
-      });
-
-      try {
-        await http.post(Uri.parse('$_baseUrl/api/clear_unknown_alert'));
-      } catch (_) {}
+  Uint8List? _safeDecodeBase64(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      String clean = raw.trim();
+      if (clean.contains(',')) clean = clean.split(',').last;
+      clean = clean.replaceAll('\n', '').replaceAll('\r', '').replaceAll(' ', '');
+      return base64Decode(clean);
+    } catch (_) {
+      return null;
     }
+  }
+
+  void _showEnrollDialog(Map<String, dynamic> item, int itemIndex) {
+    final TextEditingController nameController = TextEditingController();
+    final String? base64Img = item['image'];
+    final Uint8List? imageBytes = _safeDecodeBase64(base64Img);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.person_add_rounded, color: Color(0xFF2F80FF), size: 26),
+              SizedBox(width: 8),
+              Text("Verify & Enroll Person", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: SizedBox(
+            width: 320,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (imageBytes != null) ...[
+                    Container(
+                      height: 180,
+                      width: 320,
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      alignment: Alignment.center,
+                      child: Image.memory(
+                        imageBytes,
+                        width: 320,
+                        height: 180,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  TextField(
+                    controller: nameController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      labelText: "Full Name",
+                      hintText: "Enter name to add to household",
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      prefixIcon: const Icon(Icons.badge_outlined),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2F80FF),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () async {
+                final enteredName = nameController.text.trim();
+                if (enteredName.isNotEmpty) {
+                  Navigator.of(ctx).pop();
+                  await _enrollPerson(enteredName, base64Img ?? "", itemIndex);
+                }
+              },
+              child: const Text("Confirm & Add"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _enrollPerson(String name, String base64Image, int itemIndex) async {
+    setState(() {
+      if (itemIndex < _notificationItems.length) {
+        _notificationItems.removeAt(itemIndex);
+      }
+    });
+
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/api/enroll_unknown_person'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"name": name, "image": base64Image}),
+      ).timeout(const Duration(seconds: 5));
+
+      if (res.statusCode == 200 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$name enrolled into dataset & database!'),
+            backgroundColor: const Color(0xFF27AE60),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        await _fetchLiveNotifications();
+      }
+    } catch (_) {}
   }
 
   @override
@@ -180,7 +266,6 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                               size: 18,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
-                            tooltip: 'Back',
                             onPressed: () => Navigator.maybePop(context),
                           ),
                           Text(
@@ -201,7 +286,6 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                               color: isDark ? const Color(0xFF2F80FF) : Colors.amber.shade800,
                               size: 20,
                             ),
-                            tooltip: 'Toggle Theme',
                             onPressed: widget.onThemeToggle,
                           ),
                           Icon(Icons.wifi, size: 18, color: isDark ? Colors.white70 : Colors.black54),
@@ -288,10 +372,12 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: filteredItems.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 10),
+                              separatorBuilder: (_, __) => const SizedBox(height: 12),
                               itemBuilder: (context, index) {
                                 final item = filteredItems[index];
                                 final isCritical = item['title'].toString().contains('CRITICAL');
+                                final String? base64Img = item['image'];
+                                final Uint8List? thumbBytes = _safeDecodeBase64(base64Img);
 
                                 return Container(
                                   padding: const EdgeInsets.all(14),
@@ -300,7 +386,7 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                       color: isCritical
-                                          ? const Color(0xFFEB5757).withValues(alpha: 0.5)
+                                          ? const Color(0xFFEB5757).withValues(alpha: 0.6)
                                           : (isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0)),
                                     ),
                                   ),
@@ -318,7 +404,9 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                                                 Text(
                                                   item['title'] as String,
                                                   style: TextStyle(
-                                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                    color: isCritical
+                                                        ? const Color(0xFFEB5757)
+                                                        : (isDark ? Colors.white : const Color(0xFF0F172A)),
                                                     fontSize: 14,
                                                     fontWeight: FontWeight.w700,
                                                   ),
@@ -359,25 +447,66 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                                           ),
                                         ],
                                       ),
+                                      if (thumbBytes != null) ...[
+                                        const SizedBox(height: 10),
+                                        Row(
+                                          children: [
+                                            ClipRRect(
+                                              borderRadius: BorderRadius.circular(8),
+                                              child: Image.memory(
+                                                thumbBytes,
+                                                height: 55,
+                                                width: 55,
+                                                fit: BoxFit.cover,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            const Expanded(
+                                              child: Text(
+                                                "Target face snapshot captured by BUDDY.",
+                                                style: TextStyle(fontSize: 11, color: Colors.grey),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                       if (item['hasAction'] == true) ...[
                                         const SizedBox(height: 12),
                                         Row(
                                           mainAxisAlignment: MainAxisAlignment.end,
                                           children: [
+                                            OutlinedButton(
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor: isDark ? Colors.white70 : Colors.black87,
+                                                side: BorderSide(color: isDark ? Colors.white24 : Colors.grey.shade300),
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                                minimumSize: Size.zero,
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                              ),
+                                              onPressed: () {
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (context) => ScreenCamera(
+                                                      isDarkMode: widget.isDarkMode,
+                                                      onThemeToggle: widget.onThemeToggle,
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                              child: const Text('View Stream', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                            ),
+                                            const SizedBox(width: 8),
                                             ElevatedButton(
                                               style: ElevatedButton.styleFrom(
-                                                backgroundColor: isCritical
-                                                    ? const Color(0xFFEB5757)
-                                                    : const Color(0xFF2F80FF),
+                                                backgroundColor: const Color(0xFF2F80FF),
                                                 foregroundColor: Colors.white,
                                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                                                 minimumSize: Size.zero,
                                                 elevation: 0,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                                               ),
-                                              onPressed: () => _handleAction(item['actionType'] as String, index),
+                                              onPressed: () => _showEnrollDialog(item, index),
                                               child: Text(
                                                 item['actionText'] as String,
                                                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'login_screen.dart';
@@ -74,7 +75,9 @@ class ScreenWelcome extends StatefulWidget {
 }
 
 class _ScreenWelcomeState extends State<ScreenWelcome> {
-  static const String _baseUrl = "http://10.242.169.228:5000";
+  // Web browser-kku localhost, mobile build-kku 192.168.8.192
+  static const String _baseUrl = kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
+
   Timer? _clockTimer;
   Timer? _pingTimer;
   String _currentTimeString = '';
@@ -97,18 +100,18 @@ class _ScreenWelcomeState extends State<ScreenWelcome> {
   }
 
   void _updateClock() {
+    if (!mounted) return;
     final now = DateTime.now();
     final hour = now.hour % 12 == 0 ? 12 : now.hour % 12;
     final minute = now.minute.toString().padLeft(2, '0');
     final period = now.hour >= 12 ? 'PM' : 'AM';
-    if (mounted) {
-      setState(() {
-        _currentTimeString = '$hour:$minute $period';
-      });
-    }
+    setState(() {
+      _currentTimeString = '$hour:$minute $period';
+    });
   }
 
   Future<void> _pingRobot() async {
+    if (!mounted) return;
     try {
       final res = await http.get(Uri.parse('$_baseUrl/api/robot_status')).timeout(const Duration(seconds: 2));
       if (mounted) {
@@ -148,7 +151,6 @@ class _ScreenWelcomeState extends State<ScreenWelcome> {
             constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
               children: [
-                // Real-time Top Status Bar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   child: Row(
@@ -246,7 +248,9 @@ class _ScreenWelcomeState extends State<ScreenWelcome> {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 14,
-                            color: _isRobotReachable ? const Color(0xFF27AE60) : (isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B)),
+                            color: _isRobotReachable
+                                ? const Color(0xFF27AE60)
+                                : (isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B)),
                             fontWeight: _isRobotReachable ? FontWeight.w600 : FontWeight.normal,
                           ),
                         ),

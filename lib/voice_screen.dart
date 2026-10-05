@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'home_screen.dart';
@@ -25,10 +26,10 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
   int _selectedNavIndex = 0;
   bool _isListening = false;
   bool _isProcessing = false;
-  String _userCommand = '"Buddy, scan for any unregistered guests in the yard."';
-  String _buddyResponse = '"Starting yard scan now. Will alert you if unknown movement is found."';
+  String _userCommand = '"Buddy, scan surroundings for visitors."';
+  String _buddyResponse = '"Starting 360 camera sweep. Tracking perimeter."';
 
-  static const String _baseUrl = "http://10.242.169.228:5000";
+  static const String _baseUrl = kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
   Timer? _clockTimer;
   String _currentTimeString = '';
 
@@ -98,19 +99,20 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
     }
   }
 
+  // 4-Wheel Robot-kku thaguthiyaana direct responses mattum:
   void _fallbackResponse(String command) {
     if (!mounted) return;
     setState(() {
-      if (command == 'Come here') {
-        _buddyResponse = '"Navigating towards your coordinates now."';
-      } else if (command == 'Sit') {
-        _buddyResponse = '"Holding stationary posture at current waypoint."';
-      } else if (command == 'Patrol') {
-        _buddyResponse = '"Starting perimeter security sweep."';
-      } else if (command == 'Follow me') {
-        _buddyResponse = '"Target lock acquired. Following escort routine."';
+      if (command == 'Come here' || command == 'Move forward') {
+        _buddyResponse = '"Motors active. Rolling towards you now."';
+      } else if (command == 'Stop') {
+        _buddyResponse = '"Brakes applied. Robot stationary."';
+      } else if (command == 'Patrol area') {
+        _buddyResponse = '"Patrol route started. Monitoring room."';
+      } else if (command == 'Scan surroundings') {
+        _buddyResponse = '"Panning camera sensor to scan environment."';
       } else {
-        _buddyResponse = '"Command acknowledged. Executing requested action."';
+        _buddyResponse = '"Command received. Executing action."';
       }
     });
   }
@@ -166,10 +168,11 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
     final isDark = widget.isDarkMode;
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF060B16) : const Color(0xFFF4F6F9),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: const BoxConstraints(maxWidth: 390),
             child: Column(
               children: [
                 // Top Status Bar
@@ -183,7 +186,7 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                           IconButton(
                             icon: Icon(
                               Icons.arrow_back_ios_new,
-                              size: 18,
+                              size: 16,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
                             tooltip: 'Back',
@@ -192,7 +195,7 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                           Text(
                             _currentTimeString.isEmpty ? '...' : _currentTimeString,
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
@@ -205,30 +208,29 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                             icon: Icon(
                               isDark ? Icons.light_mode : Icons.dark_mode,
                               color: isDark ? const Color(0xFF2F80FF) : Colors.amber.shade800,
-                              size: 20,
+                              size: 18,
                             ),
-                            tooltip: 'Toggle Theme',
                             onPressed: widget.onThemeToggle,
                           ),
-                          Icon(Icons.wifi, size: 18, color: isDark ? Colors.white70 : Colors.black54),
+                          Icon(Icons.wifi, size: 16, color: isDark ? Colors.white70 : Colors.black54),
                           const SizedBox(width: 8),
-                          Icon(Icons.battery_full, size: 20, color: isDark ? Colors.white70 : Colors.black54),
+                          Icon(Icons.battery_full, size: 18, color: isDark ? Colors.white70 : Colors.black54),
                         ],
                       ),
                     ],
                   ),
                 ),
 
-                // Header Title & Active Status
+                // Header Title
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
                         'AI Voice Assistant',
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: 17,
                           fontWeight: FontWeight.w700,
                           color: isDark ? Colors.white : const Color(0xFF0F172A),
                         ),
@@ -236,8 +238,8 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                       Row(
                         children: [
                           Container(
-                            width: 8,
-                            height: 8,
+                            width: 7,
+                            height: 7,
                             decoration: const BoxDecoration(
                               color: Color(0xFF27AE60),
                               shape: BoxShape.circle,
@@ -245,10 +247,10 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            'Active Voice link',
+                            'Online Link',
                             style: TextStyle(
                               color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                              fontSize: 12,
+                              fontSize: 11,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -258,36 +260,37 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                   ),
                 ),
 
-                // Main Scrollable Area
+                // Main Area
                 Expanded(
                   child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
                       children: [
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
 
-                        // Voice Pulse Visualizer
+                        // Voice Pulse Animation
                         Center(
                           child: AnimatedBuilder(
                             animation: _animController,
                             builder: (context, child) {
-                              final scale = _isListening ? 1.0 + (_animController.value * 0.15) : 1.0;
+                              final scale = _isListening ? 1.0 + (_animController.value * 0.12) : 1.0;
                               return Transform.scale(
                                 scale: scale,
                                 child: Stack(
                                   alignment: Alignment.center,
                                   children: [
                                     Container(
-                                      width: 130,
-                                      height: 130,
+                                      width: 120,
+                                      height: 120,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: const Color(0xFF2F80FF).withValues(alpha: _isListening ? 0.25 : 0.1),
+                                        color: const Color(0xFF2F80FF).withOpacity(_isListening ? 0.25 : 0.1),
                                       ),
                                     ),
                                     Container(
-                                      width: 92,
-                                      height: 92,
+                                      width: 86,
+                                      height: 86,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
                                         color: isDark ? const Color(0xFF162033) : Colors.white,
@@ -297,8 +300,8 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                                         ),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: const Color(0xFF2F80FF).withValues(alpha: 0.35),
-                                            blurRadius: 16,
+                                            color: const Color(0xFF2F80FF).withOpacity(0.35),
+                                            blurRadius: 14,
                                             spreadRadius: 2,
                                           )
                                         ],
@@ -306,7 +309,7 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                                       child: const Icon(
                                         Icons.graphic_eq_rounded,
                                         color: Color(0xFF2F80FF),
-                                        size: 42,
+                                        size: 38,
                                       ),
                                     ),
                                   ],
@@ -315,41 +318,41 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                             },
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
 
                         Text(
                           _isProcessing
                               ? 'Executing Command...'
-                              : (_isListening ? 'Listening on Robot Mic...' : 'Tap Mic or Select Command'),
+                              : (_isListening ? 'Listening on Robot Mic...' : 'Tap Mic or Select Wheel Action'),
                           style: const TextStyle(
                             color: Color(0xFF2F80FF),
-                            fontSize: 15,
+                            fontSize: 13,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
 
-                        // Voice Waveform Bars
+                        // Waveform
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            _buildWaveBar(16),
-                            _buildWaveBar(26),
-                            _buildWaveBar(36),
-                            _buildWaveBar(20),
                             _buildWaveBar(14),
-                            _buildWaveBar(30),
+                            _buildWaveBar(24),
+                            _buildWaveBar(32),
                             _buildWaveBar(18),
+                            _buildWaveBar(12),
+                            _buildWaveBar(28),
+                            _buildWaveBar(16),
                           ],
                         ),
-                        const SizedBox(height: 28),
+                        const SizedBox(height: 20),
 
-                        // Chat Messages (User Bubble)
+                        // Chat bubbles
                         Align(
                           alignment: Alignment.centerRight,
                           child: Container(
-                            constraints: const BoxConstraints(maxWidth: 300),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            constraints: const BoxConstraints(maxWidth: 280),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                             decoration: const BoxDecoration(
                               color: Color(0xFF2F80FF),
                               borderRadius: BorderRadius.only(
@@ -360,22 +363,17 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                             ),
                             child: Text(
                               _userCommand,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                height: 1.3,
-                              ),
+                              style: const TextStyle(color: Colors.white, fontSize: 12),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
 
-                        // Buddy AI Response Bubble
                         Align(
                           alignment: Alignment.centerLeft,
                           child: Container(
-                            constraints: const BoxConstraints(maxWidth: 300),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            constraints: const BoxConstraints(maxWidth: 280),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                             decoration: BoxDecoration(
                               color: isDark ? const Color(0xFF162033) : Colors.white,
                               borderRadius: const BorderRadius.only(
@@ -391,70 +389,69 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
                               _buddyResponse,
                               style: TextStyle(
                                 color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                fontSize: 13,
-                                height: 1.3,
+                                fontSize: 12,
                               ),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 20),
 
-                        // Quick Commands Chips
+                        // Wheeled Robot Actions Mattum (No Sit/Stand)
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           alignment: WrapAlignment.center,
                           children: [
                             _buildCommandChip('Come here', isDark),
-                            _buildCommandChip('Sit', isDark),
-                            _buildCommandChip('Patrol', isDark),
-                            _buildCommandChip('Follow me', isDark),
+                            _buildCommandChip('Patrol area', isDark),
+                            _buildCommandChip('Scan surroundings', isDark),
+                            _buildCommandChip('Stop', isDark),
                           ],
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 18),
 
-                        // Center Mic Button
+                        // Center Mic Toggle Button
                         GestureDetector(
                           onTap: () {
                             setState(() {
                               _isListening = !_isListening;
                             });
                             if (_isListening) {
-                              _handleCommand('Listen for voice triggers');
+                              _handleCommand('Scan surroundings');
                             }
                           },
                           child: Container(
-                            width: 60,
-                            height: 60,
+                            width: 56,
+                            height: 56,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: _isListening ? const Color(0xFF2F80FF) : Colors.grey.shade700,
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF2F80FF).withValues(alpha: 0.4),
-                                  blurRadius: 14,
-                                  offset: const Offset(0, 4),
+                                  color: const Color(0xFF2F80FF).withOpacity(0.4),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 3),
                                 )
                               ],
                             ),
                             child: Icon(
                               _isListening ? Icons.mic : Icons.mic_none,
                               color: Colors.white,
-                              size: 28,
+                              size: 26,
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
                       ],
                     ),
                   ),
                 ),
 
-                // Bottom Navigation Bar
+                // Bottom Navigation Dock
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF162033) : Colors.white,
+                    color: isDark ? const Color(0xFF060B16) : Colors.white,
                     border: Border(
                       top: BorderSide(
                         color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
@@ -483,7 +480,7 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
   Widget _buildWaveBar(double height) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 2.5),
-      width: 4,
+      width: 3.5,
       height: height,
       decoration: BoxDecoration(
         color: const Color(0xFF2F80FF),
@@ -502,7 +499,7 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
         '"$label"',
         style: TextStyle(
           color: isDark ? Colors.white : const Color(0xFF0F172A),
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -519,14 +516,14 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
         children: [
           Icon(
             icon,
-            size: 22,
+            size: 20,
             color: const Color(0xFF8F9BB3),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 2),
           Text(
             label,
             style: const TextStyle(
-              fontSize: 10,
+              fontSize: 9,
               fontWeight: FontWeight.w500,
               color: Color(0xFF8F9BB3),
             ),
