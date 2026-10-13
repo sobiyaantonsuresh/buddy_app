@@ -23,11 +23,7 @@ class ScreenHousehold extends StatefulWidget {
 class _ScreenHouseholdState extends State<ScreenHousehold> {
   static const String _baseUrl = kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
 
-  List<Map<String, dynamic>> _members = [
-    {"name": "Sobiya", "role": "Owner", "status": "RECOGNIZED"},
-    {"name": "Rayan", "role": "Member", "status": "RECOGNIZED"},
-    {"name": "Zara", "role": "Guest", "status": "UNREGISTERED"},
-  ];
+  List<Map<String, dynamic>> _members = [];
 
   @override
   void initState() {
@@ -249,44 +245,6 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
             const Text("Manage recognized family and permissions", style: TextStyle(color: Colors.white54, fontSize: 13)),
             const SizedBox(height: 16),
 
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF162033),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF1F2937)),
-              ),
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Color(0xFF2F80FF),
-                    child: Icon(Icons.person, color: Colors.white),
-                  ),
-                  const SizedBox(width: 14),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Text("Sobiya", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(color: const Color(0xFF2F80FF), borderRadius: BorderRadius.circular(4)),
-                            child: const Text("OWNER", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      const Text("Connected since Jan 2026", style: TextStyle(color: Colors.white54, fontSize: 12)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
             const Text(
               "HOUSEHOLD MEMBERS",
               style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.8),
@@ -294,94 +252,102 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
             const SizedBox(height: 10),
 
             Expanded(
-              child: ListView.separated(
-                itemCount: _members.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final member = _members[index];
-                  final isRecognized = member['status'] == 'RECOGNIZED';
-                  final String? memberImg = member['image'];
-                  final Uint8List? memberBytes = _decodeSafeBase64(memberImg);
-
-                  return GestureDetector(
-                    onTap: () {
-                      if (!isRecognized) {
-                        _openEnrollDialog(memberImg);
-                      }
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF162033),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isRecognized ? const Color(0xFF1F2937) : Colors.orangeAccent.withValues(alpha: 0.5),
-                        ),
+              child: _members.isEmpty
+                  ? const Center(
+                      child: Text(
+                        "No household members registered yet.\nUnknown detected faces will appear here.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white38, fontSize: 13),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              memberBytes != null
-                                  ? ClipOval(
-                                      child: Image.memory(
-                                        memberBytes,
-                                        width: 40,
-                                        height: 40,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    )
-                                  : CircleAvatar(
-                                      radius: 20,
-                                      backgroundColor: isRecognized
-                                          ? const Color(0xFF2F80FF).withValues(alpha: 0.2)
-                                          : Colors.orangeAccent.withValues(alpha: 0.2),
-                                      child: Icon(
-                                        isRecognized ? Icons.person_outline : Icons.person_search_rounded,
-                                        color: isRecognized ? const Color(0xFF2F80FF) : Colors.orangeAccent,
+                    )
+                  : ListView.separated(
+                      itemCount: _members.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final member = _members[index];
+                        final isRecognized = member['status'] == 'RECOGNIZED';
+                        final String? memberImg = member['image'];
+                        final Uint8List? memberBytes = _decodeSafeBase64(memberImg);
+
+                        return GestureDetector(
+                          onTap: () {
+                            if (!isRecognized) {
+                              _openEnrollDialog(memberImg);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF162033),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isRecognized ? const Color(0xFF1F2937) : Colors.orangeAccent.withOpacity(0.5),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    memberBytes != null
+                                        ? ClipOval(
+                                            child: Image.memory(
+                                              memberBytes,
+                                              width: 40,
+                                              height: 40,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          )
+                                        : CircleAvatar(
+                                            radius: 20,
+                                            backgroundColor: isRecognized
+                                                ? const Color(0xFF2F80FF).withOpacity(0.2)
+                                                : Colors.orangeAccent.withOpacity(0.2),
+                                            child: Icon(
+                                              isRecognized ? Icons.person_outline : Icons.person_search_rounded,
+                                              color: isRecognized ? const Color(0xFF2F80FF) : Colors.orangeAccent,
+                                            ),
+                                          ),
+                                    const SizedBox(width: 12),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          member['name'] ?? '',
+                                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+                                        ),
+                                        Text(
+                                          member['role'] ?? '',
+                                          style: const TextStyle(color: Colors.white54, fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      member['status'] ?? '',
+                                      style: TextStyle(
+                                        color: isRecognized ? const Color(0xFF27AE60) : Colors.orangeAccent,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                              const SizedBox(width: 12),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    member['name'] ?? '',
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
-                                  ),
-                                  Text(
-                                    member['role'] ?? '',
-                                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          Row(
-                            children: [
-                              Text(
-                                member['status'] ?? '',
-                                style: TextStyle(
-                                  color: isRecognized ? const Color(0xFF27AE60) : Colors.orangeAccent,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.circle,
+                                      size: 6,
+                                      color: isRecognized ? const Color(0xFF27AE60) : Colors.orangeAccent,
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(width: 4),
-                              Icon(
-                                Icons.circle,
-                                size: 6,
-                                color: isRecognized ? const Color(0xFF27AE60) : Colors.orangeAccent,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
 
             Padding(

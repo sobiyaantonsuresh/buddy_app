@@ -10,7 +10,8 @@ import 'activity_screen.dart';
 import 'settings_screen.dart';
 import 'notifications_screen.dart';
 import 'household_screen.dart';
-import 'voice_screen.dart'; // Ee import vazhi ScreenVoice link cheyyunnu
+import 'voice_screen.dart';
+import 'emotion_screen.dart';
 
 class ScreenHome extends StatefulWidget {
   final bool isDarkMode;
@@ -38,7 +39,7 @@ class _ScreenHomeState extends State<ScreenHome> {
   bool _isOnline = true;
   int _batteryPercent = 92;
   String _currentState = "Patrolling";
-  String _lastFace = "sobiya";
+  String _lastFace = "Sobiya";
   String _lastEmotion = "Neutral";
   bool _hasUnknownAlert = false;
 
@@ -80,7 +81,7 @@ class _ScreenHomeState extends State<ScreenHome> {
             _isOnline = data['status'] == 'online';
             _batteryPercent = data['battery'] ?? 92;
             _currentState = data['state'] ?? 'Patrolling';
-            _lastFace = data['last_face'] ?? 'sobiya';
+            _lastFace = data['last_face'] ?? 'Sobiya';
             _lastEmotion = data['last_emotion'] ?? 'Neutral';
             _hasUnknownAlert = data['has_unknown'] ?? false;
           });
@@ -111,7 +112,6 @@ class _ScreenHomeState extends State<ScreenHome> {
     ).then((_) => _fetchRobotStatus());
   }
 
-  // Mic button click cheyyumbol ScreenVoice open aakunna method
   void _openVoiceScreen() {
     Navigator.push(
       context,
@@ -130,7 +130,6 @@ class _ScreenHomeState extends State<ScreenHome> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF060B16),
-      // Mic button click cheythaal ScreenVoice-lekku navigate aakunnu
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 45),
         child: FloatingActionButton(
@@ -358,40 +357,77 @@ class _ScreenHomeState extends State<ScreenHome> {
                           style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8),
                         ),
                         const SizedBox(height: 8),
-                        GestureDetector(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ScreenHousehold(isDarkMode: isDark, onThemeToggle: widget.onThemeToggle))),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0F1A2E),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: const Color(0xFF1B2A44)),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    const CircleAvatar(
-                                      radius: 14,
-                                      backgroundColor: Color(0xFF2563EB),
-                                      child: Icon(Icons.person, color: Colors.white, size: 16),
+
+                        // DETECTION ANALYSIS CARD:
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F1A2E),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF1B2A44)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              // Sobiya click -> Household Screen
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ScreenHousehold(
+                                        isDarkMode: isDark,
+                                        onThemeToggle: widget.onThemeToggle,
+                                      ),
                                     ),
-                                    const SizedBox(width: 10),
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(_lastFace, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                                        const Text("Registered Companion", style: TextStyle(color: Colors.white38, fontSize: 9)),
-                                      ],
-                                    ),
-                                  ],
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const CircleAvatar(
+                                        radius: 14,
+                                        backgroundColor: Color(0xFF2563EB),
+                                        child: Icon(Icons.person, color: Colors.white, size: 16),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(_lastFace, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                          const Text("Registered Companion", style: TextStyle(color: Colors.white38, fontSize: 9)),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                Text("Mood: $_lastEmotion •", style: const TextStyle(color: Color(0xFF22C55E), fontSize: 10, fontWeight: FontWeight.w600)),
-                              ],
-                            ),
+                              ),
+                              // Mood click -> Emotion Screen with dynamic _lastFace & _lastEmotion
+                              GestureDetector(
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ScreenEmotion(
+                                      isDarkMode: isDark,
+                                      onThemeToggle: widget.onThemeToggle,
+                                      targetName: _lastFace, // Dynamic name passed here!
+                                    ),
+                                  ),
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1E293B),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    "Mood: $_lastEmotion •",
+                                    style: const TextStyle(color: Color(0xFF22C55E), fontSize: 10, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
+
                         const SizedBox(height: 16),
                         const Text(
                           "QUICK COMMANDS",

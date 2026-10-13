@@ -8,6 +8,7 @@ import 'camera_screen.dart';
 import 'emotion_screen.dart';
 import 'security_screen.dart';
 import 'status_screen.dart';
+import 'settings_screen.dart';
 
 class ScreenActivity extends StatefulWidget {
   final bool isDarkMode;
@@ -24,12 +25,11 @@ class ScreenActivity extends StatefulWidget {
 }
 
 class _ScreenActivityState extends State<ScreenActivity> {
-  int _selectedNavIndex = 3; // Activity Tab
+  int _selectedNavIndex = 3; // Activity Tab Index
   String _selectedCategory = 'All';
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
-  // Correct Laptop Wi-Fi IP and Flask Backend Port
   static const String _baseUrl = "http://192.168.8.192:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
@@ -72,15 +72,6 @@ class _ScreenActivityState extends State<ScreenActivity> {
       'icon': Icons.power_settings_new_rounded,
       'color': const Color(0xFF2F80FF),
     },
-    {
-      'id': 'status',
-      'title': 'Charging Complete',
-      'desc': 'Docking station release',
-      'time': '07:30 AM',
-      'category': 'System',
-      'icon': Icons.battery_charging_full_rounded,
-      'color': const Color(0xFF27AE60),
-    },
   ];
 
   @override
@@ -112,11 +103,7 @@ class _ScreenActivityState extends State<ScreenActivity> {
     }
   }
 
-  Future<void> _fetchLiveActivities() {
-    return _fetchLogsFromApi();
-  }
-
-  Future<void> _fetchLogsFromApi() async {
+  Future<void> _fetchLiveActivities() async {
     try {
       final response = await http
           .get(Uri.parse('$_baseUrl/api/notifications'))
@@ -155,9 +142,7 @@ class _ScreenActivityState extends State<ScreenActivity> {
           }
         }
       }
-    } catch (_) {
-      // Keeps fallback logs active if server is temporarily unreachable
-    }
+    } catch (_) {}
   }
 
   IconData _getCategoryIcon(dynamic category) {
@@ -186,45 +171,13 @@ class _ScreenActivityState extends State<ScreenActivity> {
 
   void _handleActivityTap(String id) {
     if (id == 'patrol') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenSecurity(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.push(context, MaterialPageRoute(builder: (context) => ScreenSecurity(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     } else if (id == 'alert') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenCamera(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.push(context, MaterialPageRoute(builder: (context) => ScreenCamera(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     } else if (id == 'emotion') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenEmotion(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.push(context, MaterialPageRoute(builder: (context) => ScreenEmotion(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     } else if (id == 'status') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenStatus(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.push(context, MaterialPageRoute(builder: (context) => ScreenStatus(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     }
   }
 
@@ -261,25 +214,23 @@ class _ScreenActivityState extends State<ScreenActivity> {
           ),
         ),
       );
+    } else if (index == 3) {
+      setState(() => _selectedNavIndex = 3);
     } else if (index == 4) {
-      Navigator.push(
+      Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => ScreenStatus(
+          builder: (context) => ScreenSettings(
             isDarkMode: widget.isDarkMode,
             onThemeToggle: widget.onThemeToggle,
           ),
         ),
       );
-    } else {
-      setState(() => _selectedNavIndex = index);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = widget.isDarkMode;
-
     final filteredActivities = _activities.where((act) {
       final matchesCategory = _selectedCategory == 'All' || act['category'] == _selectedCategory;
       final matchesSearch = act['title'].toString().toLowerCase().contains(_searchQuery.toLowerCase()) ||
@@ -288,13 +239,13 @@ class _ScreenActivityState extends State<ScreenActivity> {
     }).toList();
 
     return Scaffold(
+      backgroundColor: const Color(0xFF060B16),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: const BoxConstraints(maxWidth: 390),
             child: Column(
               children: [
-                // Top Status Bar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(
@@ -303,128 +254,114 @@ class _ScreenActivityState extends State<ScreenActivity> {
                       Row(
                         children: [
                           IconButton(
-                            icon: Icon(
-                              Icons.arrow_back_ios_new,
-                              size: 18,
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                            tooltip: 'Back',
+                            icon: const Icon(Icons.arrow_back_ios_new, size: 14, color: Colors.white70),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
                             onPressed: () => Navigator.maybePop(context),
                           ),
+                          const SizedBox(width: 8),
                           Text(
-                            _currentTimeString.isEmpty ? '...' : _currentTimeString,
-                            style: TextStyle(
-                              fontSize: 13,
+                            _currentTimeString.isEmpty ? '12:09 PM' : _currentTimeString,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                         ],
                       ),
                       Row(
                         children: [
-                          IconButton(
-                            icon: Icon(
-                              isDark ? Icons.light_mode : Icons.dark_mode,
-                              color: isDark ? const Color(0xFF2F80FF) : Colors.amber.shade800,
-                              size: 20,
+                          GestureDetector(
+                            onTap: widget.onThemeToggle,
+                            child: const Icon(
+                              Icons.wb_sunny_outlined,
+                              color: Colors.lightBlueAccent,
+                              size: 16,
                             ),
-                            tooltip: 'Toggle Theme',
-                            onPressed: widget.onThemeToggle,
                           ),
-                          Icon(Icons.wifi, size: 18, color: isDark ? Colors.white70 : Colors.black54),
                           const SizedBox(width: 8),
-                          Icon(Icons.battery_full, size: 20, color: isDark ? Colors.white70 : Colors.black54),
+                          const Icon(Icons.wifi, color: Colors.white70, size: 16),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.battery_full, color: Colors.white70, size: 18),
                         ],
                       ),
                     ],
                   ),
                 ),
-
-                // Main Scrollable Area
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: _fetchLiveActivities,
                     child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
+                      physics: const BouncingScrollPhysics(),
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Activity Log',
+                          const SizedBox(height: 6),
+                          const Text(
+                            'ACTIVITY LOG',
                             style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              color: Colors.white38,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.8,
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Comprehensive robotic telemetry & quick logs',
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Activity History & Telemetry',
                             style: TextStyle(
-                              fontSize: 13,
-                              color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(height: 16),
-
-                          // Search Field
+                          const SizedBox(height: 14),
                           Container(
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF162033) : Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
-                              ),
+                              color: const Color(0xFF0F1A2E),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFF1B2A44)),
                             ),
                             child: TextField(
                               controller: _searchController,
                               onChanged: (value) => setState(() => _searchQuery = value),
-                              style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 13),
-                              decoration: InputDecoration(
+                              style: const TextStyle(color: Colors.white, fontSize: 13),
+                              decoration: const InputDecoration(
                                 hintText: 'Search historical events...',
-                                hintStyle: TextStyle(
-                                  color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
-                                  fontSize: 13,
-                                ),
-                                prefixIcon: Icon(
-                                  Icons.search_rounded,
-                                  size: 20,
-                                  color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                ),
+                                hintStyle: TextStyle(color: Colors.white38, fontSize: 13),
+                                prefixIcon: Icon(Icons.search_rounded, size: 20, color: Colors.white38),
                                 border: InputBorder.none,
-                                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                                contentPadding: EdgeInsets.symmetric(vertical: 12),
                               ),
                             ),
                           ),
-                          const SizedBox(height: 16),
-
-                          // Filter Chips
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: [
-                              _buildFilterChip('All', isDark),
-                              _buildFilterChip('Detections', isDark),
-                              _buildFilterChip('Patrols', isDark),
-                              _buildFilterChip('Alerts', isDark),
-                              _buildFilterChip('System', isDark),
-                            ],
+                          const SizedBox(height: 14),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                _buildCategoryChip('All'),
+                                const SizedBox(width: 8),
+                                _buildCategoryChip('Detections'),
+                                const SizedBox(width: 8),
+                                _buildCategoryChip('Patrols'),
+                                const SizedBox(width: 8),
+                                _buildCategoryChip('Alerts'),
+                                const SizedBox(width: 8),
+                                _buildCategoryChip('System'),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 16),
-
-                          // Activity List Items
+                          const SizedBox(height: 14),
                           if (filteredActivities.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 40),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 40),
                               child: Center(
                                 child: Text(
                                   'No matching activity logs found.',
-                                  style: TextStyle(
-                                    color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                    fontSize: 13,
-                                  ),
+                                  style: TextStyle(color: Colors.white38, fontSize: 12),
                                 ),
                               ),
                             )
@@ -433,7 +370,7 @@ class _ScreenActivityState extends State<ScreenActivity> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: filteredActivities.length,
-                              separatorBuilder: (_, _) => const SizedBox(height: 8),
+                              separatorBuilder: (_, __) => const SizedBox(height: 8),
                               itemBuilder: (context, index) {
                                 final item = filteredActivities[index];
                                 return GestureDetector(
@@ -441,23 +378,21 @@ class _ScreenActivityState extends State<ScreenActivity> {
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: isDark ? const Color(0xFF162033) : Colors.white,
+                                      color: const Color(0xFF0F1A2E),
                                       borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
-                                      ),
+                                      border: Border.all(color: const Color(0xFF1B2A44)),
                                     ),
                                     child: Row(
                                       children: [
                                         Container(
-                                          width: 40,
-                                          height: 40,
+                                          width: 38,
+                                          height: 38,
                                           decoration: BoxDecoration(
-                                            color: isDark ? const Color(0xFF08111F) : const Color(0xFFF1F5F9),
+                                            color: const Color(0xFF060B16),
                                             borderRadius: BorderRadius.circular(8),
                                             border: Border.all(width: 1.2, color: item['color'] as Color),
                                           ),
-                                          child: Icon(item['icon'] as IconData, size: 20, color: item['color'] as Color),
+                                          child: Icon(item['icon'] as IconData, size: 18, color: item['color'] as Color),
                                         ),
                                         const SizedBox(width: 12),
                                         Expanded(
@@ -470,10 +405,10 @@ class _ScreenActivityState extends State<ScreenActivity> {
                                                   Expanded(
                                                     child: Text(
                                                       item['title'] as String,
-                                                      style: TextStyle(
-                                                        color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                                        fontSize: 13,
-                                                        fontWeight: FontWeight.w700,
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.bold,
                                                       ),
                                                       overflow: TextOverflow.ellipsis,
                                                     ),
@@ -481,33 +416,15 @@ class _ScreenActivityState extends State<ScreenActivity> {
                                                   const SizedBox(width: 8),
                                                   Text(
                                                     item['time'] as String,
-                                                    style: TextStyle(
-                                                      color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
-                                                      fontSize: 10,
-                                                    ),
+                                                    style: const TextStyle(color: Colors.white38, fontSize: 9),
                                                   ),
                                                 ],
                                               ),
-                                              const SizedBox(height: 2),
-                                              Row(
-                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                                children: [
-                                                  Expanded(
-                                                    child: Text(
-                                                      item['desc'] as String,
-                                                      style: TextStyle(
-                                                        color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                                        fontSize: 11,
-                                                      ),
-                                                      overflow: TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                  Icon(
-                                                    Icons.arrow_forward_ios_rounded,
-                                                    size: 11,
-                                                    color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
-                                                  ),
-                                                ],
+                                              const SizedBox(height: 3),
+                                              Text(
+                                                item['desc'] as String,
+                                                style: const TextStyle(color: Colors.white60, fontSize: 10),
+                                                overflow: TextOverflow.ellipsis,
                                               ),
                                             ],
                                           ),
@@ -524,26 +441,45 @@ class _ScreenActivityState extends State<ScreenActivity> {
                     ),
                   ),
                 ),
-
-                // Bottom Navigation Bar
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF162033) : Colors.white,
-                    border: Border(
-                      top: BorderSide(
-                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
-                      ),
-                    ),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF060B16),
+                    border: Border(top: BorderSide(color: Color(0xFF131D31))),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _buildNavItem(Icons.home_rounded, 'Home', 0),
-                      _buildNavItem(Icons.tune_rounded, 'Control', 1),
-                      _buildNavItem(Icons.videocam_outlined, 'Camera', 2),
-                      _buildNavItem(Icons.timeline_rounded, 'Activity', 3),
-                      _buildNavItem(Icons.settings_outlined, 'Settings', 4),
+                      _buildBottomNavItem(
+                        icon: Icons.home_outlined,
+                        label: "Home",
+                        isSelected: _selectedNavIndex == 0,
+                        onTap: () => _onBottomNavTapped(0),
+                      ),
+                      _buildBottomNavItem(
+                        icon: Icons.sports_esports_outlined,
+                        label: "Control",
+                        isSelected: _selectedNavIndex == 1,
+                        onTap: () => _onBottomNavTapped(1),
+                      ),
+                      _buildBottomNavItem(
+                        icon: Icons.videocam_outlined,
+                        label: "Camera",
+                        isSelected: _selectedNavIndex == 2,
+                        onTap: () => _onBottomNavTapped(2),
+                      ),
+                      _buildBottomNavItem(
+                        icon: Icons.show_chart,
+                        label: "Activity",
+                        isSelected: _selectedNavIndex == 3,
+                        onTap: () => _onBottomNavTapped(3),
+                      ),
+                      _buildBottomNavItem(
+                        icon: Icons.settings_outlined,
+                        label: "Settings",
+                        isSelected: _selectedNavIndex == 4,
+                        onTap: () => _onBottomNavTapped(4),
+                      ),
                     ],
                   ),
                 ),
@@ -555,55 +491,51 @@ class _ScreenActivityState extends State<ScreenActivity> {
     );
   }
 
-  Widget _buildFilterChip(String label, bool isDark) {
-    final isSelected = _selectedCategory == label;
+  Widget _buildCategoryChip(String title) {
+    final isSelected = _selectedCategory == title;
     return GestureDetector(
-      onTap: () => setState(() => _selectedCategory = label),
+      onTap: () => setState(() => _selectedCategory = title),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
         decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF2F80FF)
-              : (isDark ? const Color(0xFF162033) : Colors.white),
-          borderRadius: BorderRadius.circular(8),
+          color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF0F1A2E),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected
-                ? const Color(0xFF2F80FF)
-                : (isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0)),
+            color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF1B2A44),
           ),
         ),
         child: Text(
-          label,
+          title,
           style: TextStyle(
-            color: isSelected ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF0F172A)),
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
+            color: isSelected ? Colors.white : Colors.white60,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
           ),
         ),
       ),
     );
   }
 
-  Widget _buildNavItem(IconData icon, String label, int index) {
-    final isSelected = _selectedNavIndex == index;
+  Widget _buildBottomNavItem({
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
-      onTap: () => _onBottomNavTapped(index),
+      onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 22,
-            color: isSelected ? const Color(0xFF2F80FF) : const Color(0xFF8F9BB3),
-          ),
+          Icon(icon, size: 20, color: isSelected ? const Color(0xFF2563EB) : Colors.white38),
           const SizedBox(height: 3),
           Text(
             label,
             style: TextStyle(
-              fontSize: 10,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-              color: isSelected ? const Color(0xFF2F80FF) : const Color(0xFF8F9BB3),
+              fontSize: 9,
+              color: isSelected ? const Color(0xFF2563EB) : Colors.white38,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             ),
           ),
         ],

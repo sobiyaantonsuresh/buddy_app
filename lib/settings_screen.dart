@@ -203,10 +203,11 @@ class _ScreenSettingsState extends State<ScreenSettings> {
     final isDark = widget.isDarkMode;
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF060B16) : Colors.white,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: const BoxConstraints(maxWidth: 390),
             child: Column(
               children: [
                 // Top Status Bar
@@ -519,12 +520,7 @@ class _ScreenSettingsState extends State<ScreenSettings> {
                                 const Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      'Firmware Update',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                      ),
-                                    ),
+                                    Text('Firmware Update', style: TextStyle(fontSize: 14)),
                                     Text(
                                       'Up to date (v3.2.1)',
                                       style: TextStyle(
@@ -578,9 +574,9 @@ class _ScreenSettingsState extends State<ScreenSettings> {
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
                       _buildNavItem(Icons.home_rounded, 'Home', 0),
-                      _buildNavItem(Icons.tune_rounded, 'Control', 1),
+                      _buildNavItem(Icons.sports_esports_outlined, 'Control', 1),
                       _buildNavItem(Icons.videocam_outlined, 'Camera', 2),
-                      _buildNavItem(Icons.timeline_rounded, 'Activity', 3),
+                      _buildNavItem(Icons.show_chart, 'Activity', 3),
                       _buildNavItem(Icons.settings_outlined, 'Settings', 4),
                     ],
                   ),
@@ -660,7 +656,7 @@ class _ScreenSettingsState extends State<ScreenSettings> {
       behavior: HitTestBehavior.opaque,
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        children: [
+     children: [
           Icon(
             icon,
             size: 22,
@@ -672,11 +668,15 @@ class _ScreenSettingsState extends State<ScreenSettings> {
             style: TextStyle(
               fontSize: 10,
               fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-              color: isSelected ? const Color(0xFF2F80FF) : const Color(0xFF8F9BB3),
+              color: isScaleSelectedColor(isSelected), // safe or direct color
             ),
           ),
         ],
       ),
     );
+  }
+
+  Color isScaleSelectedColor(bool isSelected) {
+    return isSelected ? const Color(0xFF2F80FF) : const Color(0xFF8F9BB3);
   }
 }
