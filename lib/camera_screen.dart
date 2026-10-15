@@ -26,7 +26,7 @@ class ScreenCamera extends StatefulWidget {
 
 class _ScreenCameraState extends State<ScreenCamera> {
   static const String _baseUrl =
-      kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
+      kIsWeb ? "http://127.0.0.1:5000" : "http://192.168.8.192:5000";
 
   int _currentNavIndex = 2;
   Timer? _clockTimer;
@@ -39,6 +39,10 @@ class _ScreenCameraState extends State<ScreenCamera> {
 
   String _selectedCategory = 'All';
   late String _viewType;
+
+  // Fall Alert Timers and States
+  Timer? _fallAlertTimer;
+  bool _isAlertPopupShowing = false;
 
   // Dynamic media items list fetched from the robot server
   List<Map<String, dynamic>> _mediaItems = [];
@@ -53,6 +57,9 @@ class _ScreenCameraState extends State<ScreenCamera> {
     // Fetch previously saved records from server on startup
     _fetchPersistedMedia();
 
+    // 🔔 Start background polling for Fall Alerts with Notification
+    _startFallAlertChecker();
+
     _viewType = 'video-feed-${DateTime.now().millisecondsSinceEpoch}';
     if (kIsWeb) {
       camera_web_platform.registerViewFactory(_viewType, '$_baseUrl/video_call');
@@ -63,6 +70,7 @@ class _ScreenCameraState extends State<ScreenCamera> {
   void dispose() {
     _clockTimer?.cancel();
     _recordTimer?.cancel();
+    _fallAlertTimer?.cancel();
     super.dispose();
   }
 
@@ -76,6 +84,83 @@ class _ScreenCameraState extends State<ScreenCamera> {
         _currentTimeString = '$hour:$minute $period';
       });
     }
+  }
+
+  // 🔔 Fall Alert background checker with Notification Banner
+  void _startFallAlertChecker() {
+    _fallAlertTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      if (!mounted) return;
+      try {
+        final res = await http.get(Uri.parse('$_baseUrl/api/get_fall_alert'));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data['status'] == 'alert' && !_isAlertPopupShowing) {
+            _isAlertPopupShowing = true;
+            _showFallAlertNotification(data['image'], data['time']);
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
+  // ⚠️ Floating Notification Banner for Fall Alert
+  void _showFallAlertNotification(String base64Image, String timeStr) {
+    final cleanedBase64 = base64Image.contains(',') ? base64Image.split(',').last : base64Image;
+    final bytes = base64Decode(cleanedBase64);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 8),
+        backgroundColor: const Color(0xFF0F1A2E),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.redAccent, width: 1.5),
+        ),
+        content: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(bytes, width: 50, height: 50, fit: BoxFit.cover),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "⚠️ FALL DETECTED!",
+                    style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    "Detected at $timeStr",
+                    style: const TextStyle(color: Colors.white70, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                try {
+                  await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
+                } catch (_) {}
+                
+                _isAlertPopupShowing = false;
+                setState(() {
+                  _selectedCategory = 'Alerts';
+                });
+                _fetchPersistedMedia();
+              },
+              child: const Text("View", style: TextStyle(color: Colors.blueAccent, fontSize: 11)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // Load saved captures from server
@@ -595,12 +680,11 @@ class _ScreenCameraState extends State<ScreenCamera> {
                                             ? const Color(0xFF2563EB)
                                             : Colors.black.withOpacity(0.6),
                                         child: Icon(
-                                          _isTorchOn
-                                              ? Icons.flash_on
-                                              : Icons.flash_off_outlined,
-                                          color: Colors.white,
-                                          size: 16,
-                                        ),
+                                            _isTorchOn
+                                                ? Icons.flash_on
+                                                : Icons.flash_off_outlined,
+                                            color: Colors.white,
+                                            size: 16),
                                       ),
                                     ),
                                     GestureDetector(
@@ -610,10 +694,9 @@ class _ScreenCameraState extends State<ScreenCamera> {
                                         backgroundColor:
                                             Colors.black.withOpacity(0.6),
                                         child: const Icon(
-                                          Icons.camera_alt_outlined,
-                                          color: Colors.white,
-                                          size: 18,
-                                        ),
+                                            Icons.camera_alt_outlined,
+                                            color: Colors.white,
+                                            size: 18),
                                       ),
                                     ),
                                     GestureDetector(
@@ -622,12 +705,11 @@ class _ScreenCameraState extends State<ScreenCamera> {
                                         radius: 20,
                                         backgroundColor: const Color(0xFFEB5757),
                                         child: Icon(
-                                          _isRecording
-                                              ? Icons.stop
-                                              : Icons.fiber_manual_record,
-                                          color: Colors.white,
-                                          size: _isRecording ? 18 : 22,
-                                        ),
+                                            _isRecording
+                                                ? Icons.stop
+                                                : Icons.fiber_manual_record,
+                                            color: Colors.white,
+                                            size: _isRecording ? 18 : 22),
                                       ),
                                     ),
                                     GestureDetector(
@@ -636,11 +718,8 @@ class _ScreenCameraState extends State<ScreenCamera> {
                                         radius: 17,
                                         backgroundColor:
                                             Colors.black.withOpacity(0.6),
-                                        child: const Icon(
-                                          Icons.refresh,
-                                          color: Colors.white,
-                                          size: 17,
-                                        ),
+                                        child: const Icon(Icons.refresh,
+                                            color: Colors.white, size: 17),
                                       ),
                                     ),
                                   ],

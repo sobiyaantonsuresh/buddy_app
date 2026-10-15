@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'home_screen.dart';
@@ -29,9 +30,11 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
   String _elapsedTime = 'Elapsed: 2h 15m';
   int _threatCount = 0;
 
-  static const String _baseUrl = "http://10.242.169.228:5000";
+  static const String _baseUrl = "http://192.168.8.192:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
+  Timer? _fallAlertTimer;
+  bool _isFallPopupShowing = false;
   String _currentTimeString = '';
 
   @override
@@ -41,12 +44,16 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
     _fetchSecurityStatus();
     _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) => _fetchSecurityStatus());
+    
+    // 🚨 Start background polling for Fall Detection Emergency Trigger
+    _startFallAlertListener();
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
     _pollingTimer?.cancel();
+    _fallAlertTimer?.cancel();
     super.dispose();
   }
 
@@ -60,6 +67,117 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
         _currentTimeString = '$hour:$minute $period';
       });
     }
+  }
+
+  // 🚨 Fall Alert Background Listener to Trigger Emergency Prompt
+  void _startFallAlertListener() {
+    _fallAlertTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      if (!mounted) return;
+      try {
+        final res = await http.get(Uri.parse('$_baseUrl/api/get_fall_alert'));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data['status'] == 'alert' && !_isFallPopupShowing) {
+            _isFallPopupShowing = true;
+            _showFallEmergencyDialog(data['image'], data['time']);
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
+  // ⚠️ Emergency Fall Dialog (Call Family '0743864204' or Ambulance '1990')
+  void _showFallEmergencyDialog(String base64Image, String timeStr) {
+    Uint8List? imageBytes;
+    try {
+      String clean = base64Image.trim();
+      if (clean.contains(',')) clean = clean.split(',').last;
+      imageBytes = base64Decode(clean);
+    } catch (_) {}
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: widget.isDarkMode ? const Color(0xFF162033) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFEB5757), size: 28),
+            SizedBox(width: 8),
+            Text('⚠️ FALL DETECTED!', style: TextStyle(color: Color(0xFFEB5757), fontWeight: FontWeight.w800, fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Person fall detected at $timeStr. Do you want to place an emergency call?', style: TextStyle(color: widget.isDarkMode ? Colors.white70 : Colors.black87, fontSize: 12)),
+            const SizedBox(height: 10),
+            if (imageBytes != null)
+              Container(
+                height: 140,
+                width: double.infinity,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: Colors.black),
+                clipBehavior: Clip.antiAlias,
+                child: Image.memory(imageBytes, fit: BoxFit.cover),
+              ),
+            const SizedBox(height: 10),
+            const Text('Sample Emergency Target: 0743864204', style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 11)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              try {
+                await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
+              } catch (_) {}
+              _isFallPopupShowing = false;
+              Navigator.pop(context);
+            },
+            child: const Text('Dismiss', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2F80FF), foregroundColor: Colors.white),
+            onPressed: () async {
+              try {
+                await http.post(
+                  Uri.parse('$_baseUrl/api/emergency_call'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({'action': 'call', 'number': '0743864204', 'time': timeStr}),
+                );
+                await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
+              } catch (_) {}
+              _isFallPopupShowing = false;
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Calling Family (0743864204) with fall snapshot!'), backgroundColor: Color(0xFF2F80FF)),
+              );
+            },
+            child: const Text('Call Family (0743864204)'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEB5757), foregroundColor: Colors.white),
+            onPressed: () async {
+              try {
+                await http.post(
+                  Uri.parse('$_baseUrl/api/emergency_call'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({'action': 'ambulance', 'number': '1990', 'time': timeStr}),
+                );
+                await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
+              } catch (_) {}
+              _isFallPopupShowing = false;
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Calling Ambulance (1990) with fall snapshot!'), backgroundColor: Color(0xFFEB5757)),
+              );
+            },
+            child: const Text('Call Ambulance (1990)'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _fetchSecurityStatus() async {
@@ -113,55 +231,15 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
 
   void _onBottomNavTapped(int index) {
     if (index == 0) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenHome(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ScreenHome(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     } else if (index == 1) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenControl(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ScreenControl(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     } else if (index == 2) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenCamera(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ScreenCamera(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     } else if (index == 3) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenActivity(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ScreenActivity(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     } else if (index == 4) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScreenSettings(
-            isDarkMode: widget.isDarkMode,
-            onThemeToggle: widget.onThemeToggle,
-          ),
-        ),
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => ScreenSettings(isDarkMode: widget.isDarkMode, onThemeToggle: widget.onThemeToggle)));
     } else {
       setState(() => _selectedNavIndex = index);
     }
@@ -203,9 +281,9 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
+                color: color.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: color.withValues(alpha: 0.4)),
+                border: Border.all(color: color.withOpacity(0.4)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -572,9 +650,9 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
                                 child: Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFEB5757).withValues(alpha: 0.12),
+                                    color: const Color(0xFFEB5757).withOpacity(0.12),
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: const Color(0xFFEB5757).withValues(alpha: 0.4)),
+                                    border: Border.all(color: const Color(0xFFEB5757).withOpacity(0.4)),
                                   ),
                                   child: const Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -615,9 +693,9 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
                                 child: Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF2F80FF).withValues(alpha: 0.12),
+                                    color: const Color(0xFF2F80FF).withOpacity(0.12),
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: const Color(0xFF2F80FF).withValues(alpha: 0.4)),
+                                    border: Border.all(color: const Color(0xFF2F80FF).withOpacity(0.4)),
                                   ),
                                   child: const Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,

@@ -26,6 +26,8 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
   static const String _baseUrl = kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
+  Timer? _fallAlertPollingTimer;
+  bool _isFallPopupActive = false;
   String _currentTimeString = '';
 
   List<Map<String, dynamic>> _notificationItems = [];
@@ -37,12 +39,16 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
     _fetchLiveNotifications();
     _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) => _fetchLiveNotifications());
+    
+    // 🚨 Background listener ONLY for real Fall Detection Emergency Popup
+    _startFallPopupListener();
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
     _pollingTimer?.cancel();
+    _fallAlertPollingTimer?.cancel();
     super.dispose();
   }
 
@@ -91,6 +97,25 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     } catch (_) {}
   }
 
+  // 🚨 Automatic Fall Alert Listener to trigger emergency popup strictly for falls
+  void _startFallPopupListener() {
+    _fallAlertPollingTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      if (!mounted || _isFallPopupActive) return;
+      try {
+        final res = await http.get(Uri.parse('$_baseUrl/api/get_fall_alert'));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data['status'] == 'alert' && data['image'] != null) {
+            _isFallPopupActive = true;
+            if (mounted) {
+              _showFallEmergencyDialog(data['image'], data['time'] ?? 'Recent');
+            }
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
   Future<void> _markAllAsRead() async {
     setState(() {
       for (var item in _notificationItems) {
@@ -100,6 +125,7 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
 
     try {
       await http.post(Uri.parse('$_baseUrl/api/clear_unknown_alert'));
+      await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
     } catch (_) {}
 
     if (mounted) {
@@ -123,6 +149,95 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
     } catch (_) {
       return null;
     }
+  }
+
+  // 🚨 Emergency Fall Dialog ONLY for Fall Detection (Family '0743864204' or Ambulance '1990')
+  void _showFallEmergencyDialog(String? base64Image, String timeStr) {
+    Uint8List? imageBytes = _safeDecodeBase64(base64Image);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: widget.isDarkMode ? const Color(0xFF162033) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFEB5757), size: 28),
+            SizedBox(width: 8),
+            Text('⚠️ FALL DETECTED!', style: TextStyle(color: Color(0xFFEB5757), fontWeight: FontWeight.w800, fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Person fall confirmed at $timeStr. Choose an emergency action:', style: TextStyle(color: widget.isDarkMode ? Colors.white70 : Colors.black87, fontSize: 12)),
+            const SizedBox(height: 10),
+            if (imageBytes != null)
+              Container(
+                height: 140,
+                width: double.infinity,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: Colors.black),
+                clipBehavior: Clip.antiAlias,
+                child: Image.memory(imageBytes, fit: BoxFit.cover),
+              ),
+            const SizedBox(height: 10),
+            const Text('Target Family Number: 0743864204', style: TextStyle(color: Color(0xFF2F80FF), fontWeight: FontWeight.bold, fontSize: 11)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              try {
+                await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
+              } catch (_) {}
+              _isFallPopupActive = false;
+              Navigator.pop(context);
+            },
+            child: const Text('Dismiss', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2F80FF), foregroundColor: Colors.white),
+            onPressed: () async {
+              try {
+                await http.post(
+                  Uri.parse('$_baseUrl/api/emergency_call'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({'action': 'call', 'number': '0743864204', 'time': timeStr}),
+                );
+                await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
+              } catch (_) {}
+              _isFallPopupActive = false;
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Calling Family (0743864204) with snapshot!'), backgroundColor: Color(0xFF2F80FF)),
+              );
+            },
+            child: const Text('Call Family (0743864204)'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEB5757), foregroundColor: Colors.white),
+            onPressed: () async {
+              try {
+                await http.post(
+                  Uri.parse('$_baseUrl/api/emergency_call'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({'action': 'ambulance', 'number': '1990', 'time': timeStr}),
+                );
+                await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
+              } catch (_) {}
+              _isFallPopupActive = false;
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Calling Ambulance (1990) with snapshot!'), backgroundColor: Color(0xFFEB5757)),
+              );
+            },
+            child: const Text('Call Ambulance (1990)'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showEnrollDialog(Map<String, dynamic> item, int itemIndex) {
@@ -375,147 +490,182 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
                               separatorBuilder: (_, __) => const SizedBox(height: 12),
                               itemBuilder: (context, index) {
                                 final item = filteredItems[index];
-                                final isCritical = item['title'].toString().contains('CRITICAL');
+                                final titleStr = item['title'].toString();
+                                final isFallAlert = titleStr.contains('FALL') || titleStr.contains('Fall');
+                                final isCritical = titleStr.contains('CRITICAL') || isFallAlert;
                                 final String? base64Img = item['image'];
                                 final Uint8List? thumbBytes = _safeDecodeBase64(base64Img);
 
-                                return Container(
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF162033) : Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: isCritical
-                                          ? const Color(0xFFEB5757).withValues(alpha: 0.6)
-                                          : (isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0)),
+                                return GestureDetector(
+                                  onTap: () {
+                                    if (isFallAlert) {
+                                      _showFallEmergencyDialog(base64Img, item['time'] ?? '');
+                                    } else if (item['hasAction'] == true && item['actionType'] != 'view_stream') {
+                                      _showEnrollDialog(item, index);
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: isDark ? const Color(0xFF162033) : Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: isCritical
+                                            ? const Color(0xFFEB5757).withOpacity(0.6)
+                                            : (isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0)),
+                                      ),
                                     ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    titleStr,
+                                                    style: TextStyle(
+                                                      color: isCritical
+                                                          ? const Color(0xFFEB5757)
+                                                          : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                                                      fontSize: 14,
+                                                      fontWeight: FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    item['desc'] as String,
+                                                    style: TextStyle(
+                                                      color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Row(
                                               children: [
                                                 Text(
-                                                  item['title'] as String,
+                                                  item['time'] as String,
                                                   style: TextStyle(
-                                                    color: isCritical
-                                                        ? const Color(0xFFEB5757)
-                                                        : (isDark ? Colors.white : const Color(0xFF0F172A)),
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w700,
+                                                    color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
+                                                    fontSize: 11,
                                                   ),
                                                 ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  item['desc'] as String,
-                                                  style: TextStyle(
-                                                    color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
-                                                    fontSize: 12,
+                                                if (item['isUnread'] == true) ...[
+                                                  const SizedBox(width: 6),
+                                                  Container(
+                                                    width: 6,
+                                                    height: 6,
+                                                    decoration: const BoxDecoration(
+                                                      color: Color(0xFF2F80FF),
+                                                      shape: BoxShape.circle,
+                                                    ),
                                                   ),
-                                                ),
+                                                ],
                                               ],
                                             ),
-                                          ),
-                                          const SizedBox(width: 8),
+                                          ],
+                                        ),
+                                        if (thumbBytes != null) ...[
+                                          const SizedBox(height: 10),
                                           Row(
                                             children: [
-                                              Text(
-                                                item['time'] as String,
-                                                style: TextStyle(
-                                                  color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF94A3B8),
-                                                  fontSize: 11,
+                                              ClipRRect(
+                                                borderRadius: BorderRadius.circular(8),
+                                                child: Image.memory(
+                                                  thumbBytes,
+                                                  height: 55,
+                                                  width: 55,
+                                                  fit: BoxFit.cover,
                                                 ),
                                               ),
-                                              if (item['isUnread'] == true) ...[
-                                                const SizedBox(width: 6),
-                                                Container(
-                                                  width: 6,
-                                                  height: 6,
-                                                  decoration: const BoxDecoration(
-                                                    color: Color(0xFF2F80FF),
-                                                    shape: BoxShape.circle,
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  isFallAlert
+                                                      ? "Tap to open emergency options."
+                                                      : "Tap to verify & enroll unknown person.",
+                                                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                        if (isFallAlert) ...[
+                                          const SizedBox(height: 12),
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.end,
+                                            children: [
+                                              ElevatedButton(
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: const Color(0xFFEB5757),
+                                                  foregroundColor: Colors.white,
+                                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                                  minimumSize: Size.zero,
+                                                  elevation: 0,
+                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                                ),
+                                                onPressed: () => _showFallEmergencyDialog(base64Img, item['time'] ?? ''),
+                                                child: const Text('View Emergency', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                                              ),
+                                            ],
+                                          ),
+                                        ] else if (item['hasAction'] == true) ...[
+                                          const SizedBox(height: 12),
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.end,
+                                            children: [
+                                              if (item['actionType'] == 'view_stream')
+                                                OutlinedButton(
+                                                  style: OutlinedButton.styleFrom(
+                                                    foregroundColor: isDark ? Colors.white70 : Colors.black87,
+                                                    side: BorderSide(color: isDark ? Colors.white24 : Colors.grey.shade300),
+                                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                                    minimumSize: Size.zero,
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                                  ),
+                                                  onPressed: () {
+                                                    Navigator.push(
+                                                      context,
+                                                      MaterialPageRoute(
+                                                        builder: (context) => ScreenCamera(
+                                                          isDarkMode: widget.isDarkMode,
+                                                          onThemeToggle: widget.onThemeToggle,
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                  child: const Text('View Stream', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                                ),
+                                              if (item['actionType'] != 'view_stream') ...[
+                                                const SizedBox(width: 8),
+                                                ElevatedButton(
+                                                  style: ElevatedButton.styleFrom(
+                                                    backgroundColor: const Color(0xFF2F80FF),
+                                                    foregroundColor: Colors.white,
+                                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                                    minimumSize: Size.zero,
+                                                    elevation: 0,
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                                  ),
+                                                  onPressed: () => _showEnrollDialog(item, index),
+                                                  child: Text(
+                                                    item['actionText'] as String,
+                                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
                                                   ),
                                                 ),
                                               ],
                                             ],
                                           ),
                                         ],
-                                      ),
-                                      if (thumbBytes != null) ...[
-                                        const SizedBox(height: 10),
-                                        Row(
-                                          children: [
-                                            ClipRRect(
-                                              borderRadius: BorderRadius.circular(8),
-                                              child: Image.memory(
-                                                thumbBytes,
-                                                height: 55,
-                                                width: 55,
-                                                fit: BoxFit.cover,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            const Expanded(
-                                              child: Text(
-                                                "Target face snapshot captured by BUDDY.",
-                                                style: TextStyle(fontSize: 11, color: Colors.grey),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
                                       ],
-                                      if (item['hasAction'] == true) ...[
-                                        const SizedBox(height: 12),
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.end,
-                                          children: [
-                                            OutlinedButton(
-                                              style: OutlinedButton.styleFrom(
-                                                foregroundColor: isDark ? Colors.white70 : Colors.black87,
-                                                side: BorderSide(color: isDark ? Colors.white24 : Colors.grey.shade300),
-                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                                minimumSize: Size.zero,
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                              ),
-                                              onPressed: () {
-                                                Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (context) => ScreenCamera(
-                                                      isDarkMode: widget.isDarkMode,
-                                                      onThemeToggle: widget.onThemeToggle,
-                                                    ),
-                                                  ),
-                                                );
-                                              },
-                                              child: const Text('View Stream', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            ElevatedButton(
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: const Color(0xFF2F80FF),
-                                                foregroundColor: Colors.white,
-                                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                                minimumSize: Size.zero,
-                                                elevation: 0,
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                              ),
-                                              onPressed: () => _showEnrollDialog(item, index),
-                                              child: Text(
-                                                item['actionText'] as String,
-                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ],
+                                    ),
                                   ),
                                 );
                               },
