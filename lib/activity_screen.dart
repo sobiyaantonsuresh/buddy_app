@@ -30,7 +30,7 @@ class _ScreenActivityState extends State<ScreenActivity> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
-  static const String _baseUrl = "http://192.168.8.192:5000";
+  static const String _baseUrl = "http://10.138.45.237:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
   String _currentTimeString = '';

@@ -1,3 +1,4 @@
+import 'mapping_screen.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -30,7 +31,7 @@ class _ScreenControlState extends State<ScreenControl> {
   bool _headlightOn = true;
   bool _nightVision = false;
 
-  static const String _baseUrl = "http://10.242.169.228:5000";
+  static const String _baseUrl = "http://10.138.45.237:5000";
   final String _videoFeedUrl = "$_baseUrl/video_call";
 
   // 360 Analog Joystick Variables
@@ -441,7 +442,25 @@ class _ScreenControlState extends State<ScreenControl> {
                     ),
                   ),
 
-                  // Posture Switches
+                  // BUDDY stationary ultrasonic mapping (read-only)
+                   Positioned(
+                     top: 55,
+                     right: 12,
+                     child: ElevatedButton.icon(
+                       onPressed: () => Navigator.push(
+                         context,
+                         MaterialPageRoute(builder: (_) => const ScreenMapping()),
+                       ),
+                       icon: const Icon(Icons.radar, size: 18),
+                       label: const Text('Scan Area'),
+                       style: ElevatedButton.styleFrom(
+                         backgroundColor: const Color(0xFF008EFF),
+                         foregroundColor: Colors.white,
+                       ),
+                     ),
+                   ),
+
+                   // Posture Switches
                   Positioned(
                     bottom: 170,
                     left: 16,

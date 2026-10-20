@@ -26,7 +26,7 @@ class _ScreenHouseholdState extends State<ScreenHousehold> {
   // Chrome and Flask run on the same computer. Change the mobile address
   // only if you later test from an actual phone on the same trusted LAN.
   static const String _baseUrl =
-      kIsWeb ? 'http://localhost:5000' : 'http://192.168.8.192:5000';
+      kIsWeb ? 'http://10.138.45.237:5000' : 'http://10.138.45.237:5000';
 
   static const String _householdViewType = 'buddy-household-shared-camera';
 

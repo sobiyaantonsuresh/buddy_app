@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 
 class UnknownAlertService {
   static const String baseUrl = kIsWeb
-      ? 'http://localhost:5000' : 'http://192.168.8.192:5000';
+      ? 'http://10.138.45.237:5000' : 'http://10.138.45.237:5000';
   static bool _isDialogOpen = false;
 
   static void startListening(BuildContext context) { /* UI invokes dialog explicitly. */ }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -44,20 +45,20 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
   String _lastPlayedTime = 'None';
   String _musicTarget = 'None';
 
-  static const String _baseUrl = "http://127.0.0.1:5000";
+  static const String _baseUrl = kIsWeb ? "http://10.138.45.237:5000" : "http://10.138.45.237:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
   String _currentTimeString = '';
 
   // 7 Emotions Color Mapping
   final Map<String, Color> _emotionColors = {
-    'Happy': const Color(0xFF27AE60),    // Green 😊
-    'Sad': const Color(0xFF2F80FF),      // Blue 😢
-    'Angry': const Color(0xFFEB5757),    // Red 😠
-    'Fear': const Color(0xFF9B51E0),     // Purple 😨
-    'Surprise': const Color(0xFFF2C94C), // Yellow 😲
-    'Disgust': const Color(0xFF219653),  // Dark Green 🤢
-    'Neutral': const Color(0xFF8F9BB3),  // Grey/Blue 😐
+    'Happy': const Color(0xFF27AE60),    // Green ðŸ˜Š
+    'Sad': const Color(0xFF2F80FF),      // Blue ðŸ˜¢
+    'Angry': const Color(0xFFEB5757),    // Red ðŸ˜ 
+    'Fear': const Color(0xFF9B51E0),     // Purple ðŸ˜¨
+    'Surprise': const Color(0xFFF2C94C), // Yellow ðŸ˜²
+    'Disgust': const Color(0xFF219653),  // Dark Green ðŸ¤¢
+    'Neutral': const Color(0xFF8F9BB3),  // Grey/Blue ðŸ˜
   };
 
   @override
@@ -232,14 +233,14 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
           if (status == 'playing') {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('⚠️ Music is already playing right now! Please wait.'),
+                content: Text('âš ï¸ Music is already playing right now! Please wait.'),
                 backgroundColor: Colors.orange,
               ),
             );
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('🎶 Signal sent to BUDDY for music therapy!'),
+                content: Text('ðŸŽ¶ Signal sent to BUDDY for music therapy!'),
                 backgroundColor: Color(0xFF27AE60),
               ),
             );
@@ -249,7 +250,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('❌ Error connecting to BUDDY server.'), backgroundColor: Colors.red),
+          const SnackBar(content: Text('âŒ Error connecting to BUDDY server.'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -385,7 +386,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      // 🚨 STANDALONE MUSIC STATUS CARD (Always visible, independent of emotion)
+                      // ðŸš¨ STANDALONE MUSIC STATUS CARD (Always visible, independent of emotion)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
                         padding: const EdgeInsets.all(14),
@@ -410,7 +411,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    _isMusicPlayingNow ? '🎶 MUSIC THERAPY: PLAYING' : '🎵 MUSIC THERAPY STATUS',
+                                    _isMusicPlayingNow ? 'ðŸŽ¶ MUSIC THERAPY: PLAYING' : 'ðŸŽµ MUSIC THERAPY STATUS',
                                     style: TextStyle(
                                       color: _isMusicPlayingNow ? Colors.green : const Color(0xFF2F80FF),
                                       fontWeight: FontWeight.bold,
@@ -436,7 +437,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
                         ),
                       ),
 
-                      // 🚨 FALL DETECTION EMERGENCY BANNER
+                      // ðŸš¨ FALL DETECTION EMERGENCY BANNER
                       if (_isFallEmergency)
                         Container(
                           margin: const EdgeInsets.only(bottom: 16),

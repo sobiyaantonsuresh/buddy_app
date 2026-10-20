@@ -29,7 +29,7 @@ class _ScreenVoiceState extends State<ScreenVoice> with SingleTickerProviderStat
   String _userCommand = '"Buddy, scan surroundings for visitors."';
   String _buddyResponse = '"Starting 360 camera sweep. Tracking perimeter."';
 
-  static const String _baseUrl = kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
+  static const String _baseUrl = kIsWeb ? "http://10.138.45.237:5000" : "http://10.138.45.237:5000";
   Timer? _clockTimer;
   String _currentTimeString = '';
 

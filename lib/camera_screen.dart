@@ -1,3 +1,4 @@
+import 'vision_diagnostics_screen.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -26,7 +27,7 @@ class ScreenCamera extends StatefulWidget {
 
 class _ScreenCameraState extends State<ScreenCamera> {
   static const String _baseUrl =
-      kIsWeb ? "http://127.0.0.1:5000" : "http://192.168.8.192:5000";
+      kIsWeb ? "http://10.138.45.237:5000" : "http://10.138.45.237:5000";
 
   int _currentNavIndex = 2;
   Timer? _clockTimer;
@@ -746,6 +747,21 @@ class _ScreenCameraState extends State<ScreenCamera> {
     }).toList();
 
     return Scaffold(
+      floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(top: 48),
+        child: FloatingActionButton.extended(
+          heroTag: 'buddy-vision-tests',
+          backgroundColor: const Color(0xFF078BF4),
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.science_outlined),
+          label: const Text('AI Tests'),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ScreenVisionDiagnostics()),
+          ),
+        ),
+      ),
       backgroundColor: const Color(0xFF060B16),
       body: SafeArea(
         child: Center(

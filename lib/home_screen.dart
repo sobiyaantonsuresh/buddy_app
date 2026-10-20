@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -30,7 +30,7 @@ class ScreenHome extends StatefulWidget {
 class _ScreenHomeState extends State<ScreenHome> {
   int _currentNavIndex = 0;
 
-  static const String _baseUrl = kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
+  static const String _baseUrl = kIsWeb ? "http://10.138.45.237:5000" : "http://10.138.45.237:5000";
 
   Timer? _clockTimer;
   Timer? _telemetryTimer;

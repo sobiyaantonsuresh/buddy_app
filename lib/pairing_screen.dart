@@ -24,7 +24,7 @@ class _ScreenPairingState extends State<ScreenPairing> {
   bool _isConnecting = false;
   String _connectionStatus = 'Ready to pair with BUDDY';
 
-  static const String _baseUrl = "http://10.242.169.228:5000";
+  static const String _baseUrl = "http://10.138.45.237:5000";
   Timer? _clockTimer;
   String _currentTimeString = '';
 
