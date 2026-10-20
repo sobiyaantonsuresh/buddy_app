@@ -30,6 +30,16 @@ class _ScreenCameraState extends State<ScreenCamera> {
 
   int _currentNavIndex = 2;
   Timer? _clockTimer;
+  Timer? _objectTimer;
+  bool _objectBusy = false;
+  String _objectName = '';
+  String _objectPhase = 'idle';
+  String _objectReply = 'Ready to learn an object.';
+  int _objectSamples = 0;
+  int _objectNeeded = 6;
+  List<Map<String, dynamic>> _learnedObjects = [];
+  bool _objectAvailable = true;
+  bool _objectPolling = false;
   String _currentTimeString = '';
 
   bool _isTorchOn = false;
@@ -56,6 +66,9 @@ class _ScreenCameraState extends State<ScreenCamera> {
 
     // Fetch previously saved records from server on startup
     _fetchPersistedMedia();
+    _loadLearnedObjects();
+    _pollObjectStatus();
+    _objectTimer = Timer.periodic(const Duration(seconds: 2), (_) => _pollObjectStatus());
 
     // 🔔 Start background polling for Fall Alerts with Notification
     _startFallAlertChecker();
@@ -69,6 +82,7 @@ class _ScreenCameraState extends State<ScreenCamera> {
   @override
   void dispose() {
     _clockTimer?.cancel();
+    _objectTimer?.cancel();
     _recordTimer?.cancel();
     _fallAlertTimer?.cancel();
     super.dispose();
@@ -449,6 +463,232 @@ class _ScreenCameraState extends State<ScreenCamera> {
     );
   }
 
+  // BUDDY object learning: uses the Flask shared camera, never another webcam.
+  String _objectError(http.Response response) {
+    try {
+      final data = jsonDecode(response.body);
+      if (data is Map && data['error'] != null) return data['error'].toString();
+      if (data is Map && data['reply'] != null) return data['reply'].toString();
+    } catch (_) {}
+    return 'Backend returned HTTP ${response.statusCode}';
+  }
+
+  Future<void> _pollObjectStatus() async {
+    if (!mounted || _objectPolling) return;
+    _objectPolling = true;
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/api/objects/teach/status'))
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) throw Exception(_objectError(response));
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _objectAvailable = true;
+        _objectPhase = (data['phase'] ?? 'idle').toString();
+        _objectSamples = (data['samples'] as num?)?.toInt() ?? 0;
+        _objectNeeded = (data['samples_needed'] as num?)?.toInt() ?? 6;
+        _objectReply = (data['reply'] ?? '').toString();
+      });
+    } catch (_) {
+      if (mounted) setState(() => _objectAvailable = false);
+    } finally {
+      _objectPolling = false;
+    }
+  }
+
+  Future<void> _loadLearnedObjects() async {
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/api/objects'))
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return;
+      final data = jsonDecode(response.body);
+      if (data is List && mounted) {
+        setState(() => _learnedObjects = data
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList());
+      }
+    } catch (_) {}
+  }
+
+  void _objectToast(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: error ? const Color(0xFFB8433F) : const Color(0xFF173F37),
+    ));
+  }
+
+  Future<void> _objectCommand(String action) async {
+    if (_objectBusy) return;
+    if (action == 'start' && _objectName.trim().length < 2) {
+      _objectToast('Please enter an object name first.', error: true);
+      return;
+    }
+    setState(() => _objectBusy = true);
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/objects/teach'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': action, 'name': _objectName.trim()}),
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode != 200) throw Exception(_objectError(response));
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data['ok'] != true) throw Exception(data['error'] ?? 'Object command failed');
+      if (mounted) {
+        setState(() {
+          _objectPhase = (data['phase'] ?? 'idle').toString();
+          _objectSamples = (data['samples'] as num?)?.toInt() ?? 0;
+          _objectNeeded = (data['samples_needed'] as num?)?.toInt() ?? 6;
+          _objectReply = (data['reply'] ?? '').toString();
+        });
+      }
+      if (data['saved'] == true) {
+        _objectToast('Object saved to BUDDY database!');
+        await _loadLearnedObjects();
+      } else if (action == 'start' || action == 'cancel') {
+        _objectToast(_objectReply);
+      }
+    } catch (e) {
+      _objectToast('Object learning: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _objectBusy = false);
+      await _pollObjectStatus();
+    }
+  }
+
+  Future<void> _identifyObject() async {
+    if (_objectBusy) return;
+    setState(() => _objectBusy = true);
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/objects/identify'),
+        headers: const {'Content-Type': 'application/json'},
+        body: '{}',
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode != 200) throw Exception(_objectError(response));
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data['success'] != true) throw Exception(data['error'] ?? 'Identify failed');
+      final result = (data['text'] ?? 'No result').toString();
+      if (mounted) setState(() => _objectReply = result);
+      _objectToast(result);
+    } catch (e) {
+      _objectToast('Identify: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _objectBusy = false);
+    }
+  }
+
+  Widget _buildObjectLearningPanel() {
+    final dark = widget.isDarkMode;
+    final bg = dark ? const Color(0xFF0F1A2E) : const Color(0xFFFFFDF8);
+    final ink = dark ? Colors.white : const Color(0xFF173630);
+    final subtle = dark ? Colors.white70 : const Color(0xFF506A61);
+    final capturing = _objectPhase == 'capturing';
+    final confirm = _objectPhase == 'confirm_save' ||
+        _objectPhase == 'confirm_duplicate';
+    final idle = _objectPhase == 'idle';
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: dark ? const Color(0xFF263A4F) : const Color(0xFFDCEFE5)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.auto_awesome, color: Color(0xFF38A37C), size: 20),
+          const SizedBox(width: 8),
+          Expanded(child: Text('BUDDY Object Learning',
+              style: TextStyle(color: ink, fontWeight: FontWeight.bold, fontSize: 15))),
+          Icon(_objectAvailable ? Icons.check_circle : Icons.cloud_off,
+              color: _objectAvailable ? const Color(0xFF2AA677) : Colors.orange, size: 16),
+        ]),
+        const SizedBox(height: 8),
+        Text('Uses the live shared camera. Keep faces outside the object view.',
+            style: TextStyle(color: subtle, fontSize: 11)),
+        const SizedBox(height: 12),
+        TextField(
+          enabled: idle && !_objectBusy,
+          onChanged: (value) => _objectName = value,
+          style: TextStyle(color: ink),
+          decoration: InputDecoration(
+            hintText: 'Object name (e.g. my blue box)',
+            hintStyle: TextStyle(color: subtle),
+            prefixIcon: const Icon(Icons.label_outline),
+            isDense: true,
+            filled: true,
+            fillColor: dark ? const Color(0xFF15243B) : const Color(0xFFF5F0E5),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (capturing || confirm) ...[
+          Text('Samples: $_objectSamples / $_objectNeeded  •  ${_objectPhase.replaceAll('_', ' ')}',
+              style: TextStyle(color: ink, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: _objectNeeded > 0 ? (_objectSamples / _objectNeeded).clamp(0.0, 1.0) : 0,
+            backgroundColor: dark ? Colors.white12 : const Color(0xFFDCEFE5),
+            valueColor: const AlwaysStoppedAnimation(Color(0xFF2AA677)),
+          ),
+          const SizedBox(height: 10),
+        ],
+        Text(_objectReply, style: TextStyle(color: subtle, fontSize: 12)),
+        const SizedBox(height: 12),
+        if (!_objectAvailable)
+          Text('Object API unavailable. Check Flask.', style: TextStyle(color: Colors.orange.shade700)),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          if (idle)
+            ElevatedButton.icon(
+              onPressed: _objectBusy || !_objectAvailable ? null : () => _objectCommand('start'),
+              icon: const Icon(Icons.school_outlined, size: 16),
+              label: const Text('Teach Object'),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF173F37), foregroundColor: Colors.white),
+            ),
+          if (idle)
+            OutlinedButton.icon(
+              onPressed: _objectBusy || !_objectAvailable ? null : _identifyObject,
+              icon: const Icon(Icons.search, size: 16),
+              label: const Text('Identify'),
+            ),
+          if (confirm)
+            ElevatedButton.icon(
+              onPressed: _objectBusy ? null : () => _objectCommand('confirm'),
+              icon: const Icon(Icons.check, size: 16),
+              label: Text(_objectPhase == 'confirm_duplicate' ? 'Yes, same object' : 'Confirm & Save'),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF173F37), foregroundColor: Colors.white),
+            ),
+          if (confirm)
+            OutlinedButton(onPressed: _objectBusy ? null : () => _objectCommand('reject'),
+                child: const Text('No')),
+          if (!idle)
+            TextButton.icon(
+              onPressed: _objectBusy ? null : () => _objectCommand('cancel'),
+              icon: const Icon(Icons.close, size: 16),
+              label: const Text('Cancel'),
+            ),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: Text('Learned objects (${_learnedObjects.length})',
+              style: TextStyle(color: ink, fontSize: 12, fontWeight: FontWeight.bold))),
+          IconButton(onPressed: _loadLearnedObjects, icon: Icon(Icons.refresh, color: subtle),
+              tooltip: 'Refresh learned objects', visualDensity: VisualDensity.compact),
+        ]),
+        if (_learnedObjects.isEmpty)
+          Text('No learned objects loaded yet.', style: TextStyle(color: subtle, fontSize: 11))
+        else
+          Wrap(spacing: 6, runSpacing: 6,
+            children: _learnedObjects.map((item) => Chip(
+              label: Text('${item['name']} (${item['samples'] ?? '?'} samples)'),
+              visualDensity: VisualDensity.compact,
+            )).toList(),
+          ),
+      ]),
+    );
+  }
+
   void _onBottomNavTapped(int index) {
     if (index == 0) {
       Navigator.pushReplacement(
@@ -728,6 +968,8 @@ class _ScreenCameraState extends State<ScreenCamera> {
                             ],
                           ),
                         ),
+                        const SizedBox(height: 18),
+                        _buildObjectLearningPanel(),
                         const SizedBox(height: 18),
                         const Text(
                           "CAPTURED MEDIA GALLERY",

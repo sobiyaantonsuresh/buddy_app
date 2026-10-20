@@ -17,7 +17,7 @@ class ScreenEmotion extends StatefulWidget {
     super.key,
     required this.isDarkMode,
     required this.onThemeToggle,
-    this.targetName = 'sobiya',
+    this.targetName = 'ashandth',
   });
 
   @override
@@ -27,8 +27,11 @@ class ScreenEmotion extends StatefulWidget {
 class _ScreenEmotionState extends State<ScreenEmotion> {
   int _selectedNavIndex = 3;
   late String _targetName;
-  String _currentEmotion = 'Neutral';
-  int _confidence = 85;
+  String _currentEmotion = 'Unknown';
+  List<String> _householdNames = [];
+  String? _profileError;
+
+  int _confidence = 0;
   bool _isMusicRequested = false;
   bool _isMusicPlayingNow = false; // Backend polling moolam update aagum
   List<dynamic> _reports24h = [];
@@ -60,7 +63,8 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
   @override
   void initState() {
     super.initState();
-    _targetName = widget.targetName;
+    _targetName = widget.targetName.trim().isEmpty ? 'Ashandth' : widget.targetName.trim();
+    _loadHouseholdMembers();
     _updateClock();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) => _updateClock());
     _fetchEmotionReport24h();
@@ -86,9 +90,59 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
     }
   }
 
+  Future<void> _loadHouseholdMembers() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/api/household_members'),
+      ).timeout(const Duration(seconds: 4));
+      if (response.statusCode != 200) throw Exception('Household API unavailable');
+      final decoded = jsonDecode(response.body);
+      if (decoded is! List) throw Exception('Invalid household response');
+      final names = decoded.map((entry) => entry is Map ? entry['name']?.toString().trim() : null)
+          .whereType<String>().where((name) => name.isNotEmpty).toSet().toList();
+      if (!mounted) return;
+      setState(() {
+        _householdNames = names;
+        _profileError = null;
+        if (names.isNotEmpty && !names.any((name) => name.toLowerCase() == _targetName.toLowerCase())) {
+          _targetName = names.first;
+          _reports24h = [];
+          _currentEmotion = 'Unknown';
+          _confidence = 0;
+          _isLoading = true;
+        } else {
+          for (final name in names) {
+            if (name.toLowerCase() == _targetName.toLowerCase()) _targetName = name;
+          }
+        }
+      });
+      await _fetchEmotionReport24h();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _profileError = 'Household list unavailable');
+    }
+  }
+
+  void _selectHouseholdMember(String? name) {
+    if (name == null || name == _targetName) return;
+    setState(() {
+      _targetName = name;
+      _reports24h = [];
+      _currentEmotion = 'Unknown';
+      _confidence = 0;
+      _isFallEmergency = false;
+      _isMusicPlayingNow = false;
+      _lastPlayedTime = 'None';
+      _musicTarget = name;
+      _isLoading = true;
+    });
+    _fetchEmotionReport24h();
+  }
+
   Future<void> _fetchEmotionReport24h() async {
     try {
-      final cleanTarget = _targetName.trim().toLowerCase();
+      final requestedTarget = _targetName;
+      final cleanTarget = Uri.encodeComponent(requestedTarget.trim().toLowerCase());
       final response = await http
           .get(Uri.parse('$_baseUrl/api/emotion_report/$cleanTarget'))
           .timeout(const Duration(seconds: 3));
@@ -105,7 +159,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
         final String serverLastTime = data['last_played_time'] ?? 'None';
         final String serverTarget = data['music_target'] ?? _targetName;
 
-        if (mounted) {
+        if (mounted && _targetName == requestedTarget) {
           setState(() {
             _reports24h = recentReports;
             _isFallEmergency = fallDetected;
@@ -116,11 +170,16 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
             if (reports.isNotEmpty) {
               final latest = reports.last;
               _currentEmotion = _capitalize(latest['emotion'] ?? 'neutral');
-              _confidence = ((latest['confidence'] ?? 0.85) * 100).toInt();
+              _confidence = ((latest['confidence'] ?? 0.0) * 100).round();
+            } else {
+              _currentEmotion = 'Unknown';
+              _confidence = 0;
             }
             _isLoading = false;
           });
         }
+      } else {
+        if (mounted && _targetName == requestedTarget) setState(() => _isLoading = false);
       }
     } catch (_) {
       if (mounted) setState(() => _isLoading = false);
@@ -293,6 +352,39 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
                       ),
                       const SizedBox(height: 16),
 
+                      // Household member picker - only registered names from live Flask API.
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF10192D) : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('HOUSEHOLD MEMBER', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white70 : const Color(0xFF64748B))),
+                            const SizedBox(height: 5),
+                            if (_householdNames.isNotEmpty)
+                              DropdownButton<String>(
+                                isExpanded: true,
+                                value: _householdNames.contains(_targetName) ? _targetName : _householdNames.first,
+                                underline: const SizedBox.shrink(),
+                                items: _householdNames.map((name) => DropdownMenuItem<String>(
+                                  value: name,
+                                  child: Text(name, style: TextStyle(color: isDark ? Colors.white : const Color(0xFF173630))),
+                                )).toList(),
+                                onChanged: _selectHouseholdMember,
+                              )
+                            else
+                              Text(_profileError ?? 'Loading registered household members...',
+                                style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
                       // 🚨 STANDALONE MUSIC STATUS CARD (Always visible, independent of emotion)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
@@ -331,7 +423,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
                                         ? 'Song is currently playing for ${_musicTarget.toUpperCase()}...'
                                         : (_lastPlayedTime != 'None'
                                             ? 'Last Played for: ${_musicTarget.toUpperCase()} at $_lastPlayedTime'
-                                            : 'No music played recently.'),
+                                            : 'Music status is not available from this server.'),
                                     style: TextStyle(
                                       color: isDark ? Colors.white70 : Colors.black87,
                                       fontSize: 11,
@@ -417,7 +509,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
                                     Text(
                                       _isMusicPlayingNow
                                           ? 'Music therapy is currently playing for ${_targetName.toUpperCase()}...'
-                                          : '${_targetName.toUpperCase()} is feeling $_currentEmotion right now. Ask BUDDY to play soothing music?',
+                                          : 'A $_currentEmotion facial expression was estimated for ${_targetName.toUpperCase()}. You can offer music if they want it.',
                                       style: TextStyle(color: isDark ? Colors.white70 : Colors.black87, fontSize: 11),
                                     ),
                                     const SizedBox(height: 8),
@@ -471,7 +563,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Text(
-                                    '$_confidence% ACCURACY',
+                                    _currentEmotion == 'Unknown' ? 'NO MODEL SCORE' : '$_confidence% MODEL SCORE',
                                     style: TextStyle(color: activeColor, fontSize: 9, fontWeight: FontWeight.bold),
                                   ),
                                 ),
@@ -547,6 +639,30 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
                                     ),
                                   ),
                       ),
+                      const SizedBox(height: 12),
+                      Text('EXPRESSION COLOR GUIDE',
+                        style: TextStyle(color: isDark ? const Color(0xFF8F9BB3) : const Color(0xFF64748B),
+                          fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 14,
+                        runSpacing: 10,
+                        children: _emotionColors.entries.map((entry) => Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(width: 12, height: 12,
+                              decoration: BoxDecoration(color: entry.value,
+                                borderRadius: BorderRadius.circular(3))),
+                            const SizedBox(width: 5),
+                            Text(entry.key, style: TextStyle(fontSize: 11,
+                              color: isDark ? Colors.white70 : const Color(0xFF475569))),
+                          ],
+                        )).toList(),
+                      ),
+                      const SizedBox(height: 8),
+                      Text('Colors represent estimated facial expressions, not confirmed feelings.',
+                        style: TextStyle(fontSize: 10,
+                          color: isDark ? Colors.white54 : const Color(0xFF64748B))),
                       const SizedBox(height: 24),
                     ],
                   ),

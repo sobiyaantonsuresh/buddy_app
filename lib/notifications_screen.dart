@@ -117,24 +117,23 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
   }
 
   Future<void> _markAllAsRead() async {
-    setState(() {
-      for (var item in _notificationItems) {
-        item['isUnread'] = false;
-      }
-    });
-
     try {
-      await http.post(Uri.parse('$_baseUrl/api/clear_unknown_alert'));
-      await http.post(Uri.parse('$_baseUrl/api/clear_fall_alert'));
-    } catch (_) {}
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All notifications marked as read.'),
-          backgroundColor: Color(0xFF27AE60),
-          duration: Duration(seconds: 1),
-        ),
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/clear_unknown_alert'),
+      ).timeout(const Duration(seconds: 5));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Backend did not acknowledge the request');
+      }
+      if (!mounted) return;
+      setState(() {
+        for (final item in _notificationItems) {
+          item['isUnread'] = false;
+        }
+      });
+      await _fetchLiveNotifications();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to clear alerts: $e')),
       );
     }
   }
@@ -211,7 +210,7 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
               _isFallPopupActive = false;
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Calling Family (0743864204) with snapshot!'), backgroundColor: Color(0xFF2F80FF)),
+                const SnackBar(content: Text('Emergency request sent to backend; call not verified.'), backgroundColor: Color(0xFF2F80FF)),
               );
             },
             child: const Text('Call Family (0743864204)'),
@@ -230,7 +229,7 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
               _isFallPopupActive = false;
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Calling Ambulance (1990) with snapshot!'), backgroundColor: Color(0xFFEB5757)),
+                const SnackBar(content: Text('Emergency request sent to backend; call not verified.'), backgroundColor: Color(0xFFEB5757)),
               );
             },
             child: const Text('Call Ambulance (1990)'),
@@ -241,114 +240,107 @@ class _ScreenNotificationsState extends State<ScreenNotifications> {
   }
 
   void _showEnrollDialog(Map<String, dynamic> item, int itemIndex) {
-    final TextEditingController nameController = TextEditingController();
-    final String? base64Img = item['image'];
+    String enteredName = '';
+    bool subjectConfirmed = false;
+    bool busy = false;
+    String? errorMessage;
+    final String? base64Img = item['image'] as String?;
     final Uint8List? imageBytes = _safeDecodeBase64(base64Img);
 
-    showDialog(
+    showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.person_add_rounded, color: Color(0xFF2F80FF), size: 26),
-              SizedBox(width: 8),
-              Text("Verify & Enroll Person", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ],
-          ),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, refresh) => AlertDialog(
+          backgroundColor: widget.isDarkMode
+              ? const Color(0xFF162033) : const Color(0xFFFFFDF8),
+          title: const Text('Verify & Enroll Person'),
           content: SizedBox(
             width: 320,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (imageBytes != null) ...[
-                    Container(
-                      height: 180,
-                      width: 320,
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      alignment: Alignment.center,
-                      child: Image.memory(
-                        imageBytes,
-                        width: 320,
-                        height: 180,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                  ],
+                  if (imageBytes != null)
+                    Image.memory(imageBytes, height: 130, fit: BoxFit.cover),
+                  const SizedBox(height: 12),
+                  const Text('The person must be alone in the live camera view. '
+                      'BUDDY captures fresh face samples from the shared webcam.'),
                   TextField(
-                    controller: nameController,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      labelText: "Full Name",
-                      hintText: "Enter name to add to household",
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      prefixIcon: const Icon(Icons.badge_outlined),
-                    ),
+                    enabled: !busy,
+                    onChanged: (value) => enteredName = value.trim(),
+                    decoration: const InputDecoration(labelText: 'Full name'),
                   ),
+                  CheckboxListTile(
+                    value: subjectConfirmed,
+                    onChanged: busy ? null : (value) => refresh(() {
+                      subjectConfirmed = value == true;
+                    }),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('The person being enrolled has explicitly '
+                        'agreed to BUDDY storing their face templates.'),
+                  ),
+                  if (errorMessage != null)
+                    Text(errorMessage!, style: const TextStyle(color: Colors.red)),
                 ],
               ),
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+              onPressed: busy ? null : () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2F80FF),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () async {
-                final enteredName = nameController.text.trim();
-                if (enteredName.isNotEmpty) {
-                  Navigator.of(ctx).pop();
-                  await _enrollPerson(enteredName, base64Img ?? "", itemIndex);
+              onPressed: busy ? null : () async {
+                if (enteredName.length < 2 || !subjectConfirmed) {
+                  refresh(() => errorMessage =
+                      'Enter a valid name and confirm the person has consented.');
+                  return;
+                }
+                refresh(() { busy = true; errorMessage = null; });
+                try {
+                  final result = await _enrollPerson(enteredName);
+                  if (!dialogContext.mounted) return;
+                  Navigator.of(dialogContext).pop();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('${result['name']} enrolled successfully '
+                        '(${result['templates']} templates).'),
+                    backgroundColor: const Color(0xFF278657),
+                  ));
+                  await _fetchLiveNotifications();
+                } catch (e) {
+                  if (!dialogContext.mounted) return;
+                  refresh(() {
+                    busy = false;
+                    errorMessage = e.toString().replaceFirst('Exception: ', '');
+                  });
                 }
               },
-              child: const Text("Confirm & Add"),
+              child: Text(busy ? 'Registering...' : 'Confirm & Add'),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 
-  Future<void> _enrollPerson(String name, String base64Image, int itemIndex) async {
-    setState(() {
-      if (itemIndex < _notificationItems.length) {
-        _notificationItems.removeAt(itemIndex);
-      }
-    });
-
-    try {
-      final res = await http.post(
-        Uri.parse('$_baseUrl/api/enroll_unknown_person'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"name": name, "image": base64Image}),
-      ).timeout(const Duration(seconds: 5));
-
-      if (res.statusCode == 200 && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$name enrolled into dataset & database!'),
-            backgroundColor: const Color(0xFF27AE60),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        await _fetchLiveNotifications();
-      }
-    } catch (_) {}
+  Future<Map<String, dynamic>> _enrollPerson(String name) async {
+    final res = await http.post(
+      Uri.parse('$_baseUrl/api/enroll_unknown_person'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'name': name, 'subject_consent': true}),
+    ).timeout(const Duration(seconds: 45));
+    dynamic data;
+    try { data = jsonDecode(res.body); } catch (_) {}
+    if (res.statusCode != 200 && res.statusCode != 201 ||
+        data is! Map || data['success'] != true || data['person_id'] == null) {
+      final message = data is Map && data['error'] != null
+          ? data['error'].toString() : 'Enrollment failed (HTTP ${res.statusCode})';
+      throw Exception(message);
+    }
+    return Map<String, dynamic>.from(data);
   }
 
   @override
