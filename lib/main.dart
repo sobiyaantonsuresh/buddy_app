@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'buddy_theme.dart';
 import 'login_screen.dart';
 
 void main() {
@@ -16,7 +17,7 @@ class BuddyMainApp extends StatefulWidget {
 }
 
 class _BuddyMainAppState extends State<BuddyMainApp> {
-  ThemeMode _themeMode = ThemeMode.dark;
+  ThemeMode _themeMode = ThemeMode.light;
 
   void _toggleTheme() {
     setState(() {
@@ -30,17 +31,7 @@ class _BuddyMainAppState extends State<BuddyMainApp> {
       debugShowCheckedModeBanner: false,
       title: 'BUDDY Companion',
       themeMode: _themeMode,
-      theme: ThemeData(
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: const Color(0xFFF4F6F9),
-        primaryColor: const Color(0xFF2F80FF),
-        cardColor: Colors.white,
-        colorScheme: const ColorScheme.light(
-          primary: Color(0xFF2F80FF),
-          surface: Colors.white,
-          onSurface: Color(0xFF0F172A),
-        ),
-      ),
+      theme: BuddyTheme.light,
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF08111F),
@@ -76,7 +67,7 @@ class ScreenWelcome extends StatefulWidget {
 
 class _ScreenWelcomeState extends State<ScreenWelcome> {
   // Web browser-kku localhost, mobile build-kku 192.168.8.192
-  static const String _baseUrl = kIsWeb ? "http://localhost:5000" : "http://192.168.8.192:5000";
+  static const String _baseUrl = kIsWeb ? "http://10.107.185.237:5000" : "http://10.107.185.237:5000";
 
   Timer? _clockTimer;
   Timer? _pingTimer;
