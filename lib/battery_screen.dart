@@ -18,7 +18,7 @@ class ScreenBattery extends StatefulWidget {
 }
 
 class _ScreenBatteryState extends State<ScreenBattery> {
-  static const String _baseUrl = "http://10.138.45.237:5000";
+  static const String _baseUrl = "http://10.107.185.237:5000";
 
   bool _powerSavingMode = false;
   bool _autoReturnDock = true;

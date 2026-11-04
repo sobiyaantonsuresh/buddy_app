@@ -45,7 +45,7 @@ class _ScreenEmotionState extends State<ScreenEmotion> {
   String _lastPlayedTime = 'None';
   String _musicTarget = 'None';
 
-  static const String _baseUrl = kIsWeb ? "http://10.138.45.237:5000" : "http://10.138.45.237:5000";
+  static const String _baseUrl = kIsWeb ? "http://10.107.185.237:5000" : "http://10.107.185.237:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
   String _currentTimeString = '';

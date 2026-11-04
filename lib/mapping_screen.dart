@@ -13,7 +13,7 @@ class ScreenMapping extends StatefulWidget {
 }
 
 class _ScreenMappingState extends State<ScreenMapping> {
-  static const baseUrl = 'http://10.138.45.237:5000';
+  static const baseUrl = 'http://10.107.185.237:5000';
 
   Timer? _timer;
   Map<String, dynamic>? _data;

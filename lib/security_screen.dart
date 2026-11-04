@@ -30,7 +30,7 @@ class _ScreenSecurityState extends State<ScreenSecurity> {
   String _elapsedTime = 'Elapsed: 2h 15m';
   int _threatCount = 0;
 
-  static const String _baseUrl = "http://10.138.45.237:5000";
+  static const String _baseUrl = "http://10.107.185.237:5000";
   Timer? _clockTimer;
   Timer? _pollingTimer;
   Timer? _fallAlertTimer;

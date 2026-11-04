@@ -27,7 +27,7 @@ class ScreenCamera extends StatefulWidget {
 
 class _ScreenCameraState extends State<ScreenCamera> {
   static const String _baseUrl =
-      kIsWeb ? "http://10.138.45.237:5000" : "http://10.138.45.237:5000";
+      kIsWeb ? "http://10.107.185.237:5000" : "http://10.107.185.237:5000";
 
   int _currentNavIndex = 2;
   Timer? _clockTimer;

@@ -1,9 +1,17 @@
+import 'camera_web_platform.dart' as camera_web_platform;
+
+import 'package:flutter/foundation.dart';
+
 import 'mapping_screen.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+
 import 'home_screen.dart';
 import 'camera_screen.dart';
 import 'activity_screen.dart';
@@ -24,6 +32,8 @@ class ScreenControl extends StatefulWidget {
 }
 
 class _ScreenControlState extends State<ScreenControl> {
+  late final String _controlFpvViewType;
+
   int _selectedNavIndex = 1;
   String _activePosture = 'Stand';
   final double _speedValue = 1.2;
@@ -31,7 +41,7 @@ class _ScreenControlState extends State<ScreenControl> {
   bool _headlightOn = true;
   bool _nightVision = false;
 
-  static const String _baseUrl = "http://10.138.45.237:5000";
+  static const String _baseUrl = "http://10.107.185.237:5000";
   final String _videoFeedUrl = "$_baseUrl/video_call";
 
   // 360 Analog Joystick Variables
@@ -89,25 +99,269 @@ class _ScreenControlState extends State<ScreenControl> {
   }
 
   // Send movement commands to Python / ROS 2 backend
-  Future<void> _sendMoveCommand(String direction, double linear, double angular) async {
-    // Throttle network requests to once every 120ms to prevent flooding
-    if (DateTime.now().difference(_lastCommandSent).inMilliseconds < 120 && direction != 'STOP') {
+  Timer? _driveHeartbeat;
+  String _heldDriveDirection = 'STOP';
+
+  void _syncDriveHeartbeat(String direction) {
+    final next = direction.toUpperCase();
+
+    if (next == 'STOP' || next == 'STANDBY' || next == 'IDLE') {
+      _driveHeartbeat?.cancel();
+      _driveHeartbeat = null;
+      _heldDriveDirection = 'STOP';
       return;
     }
-    _lastCommandSent = DateTime.now();
 
+    if (_heldDriveDirection == next && (_driveHeartbeat?.isActive ?? false)) {
+      return;
+    }
+
+    _driveHeartbeat?.cancel();
+    _heldDriveDirection = next;
+
+    _sendMoveCommand(next, 0.0, 0.0);
+
+    _driveHeartbeat = Timer.periodic(const Duration(milliseconds: 180), (_) {
+      if (!mounted) return;
+      _sendMoveCommand(_heldDriveDirection, 0.0, 0.0);
+    });
+  }
+
+  @override
+  void dispose() {
+    _driveHeartbeat?.cancel();
+    _sendMoveCommand('STOP', 0.0, 0.0);
+    super.dispose();
+  }
+
+  String? _buddySession;
+
+  // Restore only the paired phone's temporary device credential.
+  Future<void> _restoreBuddySession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('buddy_paired_phone_session');
+    if (!mounted || token == null || token.isEmpty) return;
+    setState(() => _buddySession = token);
+  }
+
+  bool _buddyArmed = false;
+  bool _buddySendingMove = false;
+  bool _buddyStopQueued = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controlFpvViewType =
+        'buddy-control-${DateTime.now().microsecondsSinceEpoch}';
+
+    if (kIsWeb) {
+      camera_web_platform.registerViewFactory(
+        _controlFpvViewType,
+        '$_baseUrl/video_call',
+      );
+    }
+
+    _restoreBuddySession();
+  }
+
+  void _buddyNotice(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<bool> _buddyAction(String action) async {
+    final session = _buddySession;
+    if (session == null) {
+      _buddyNotice('Pair with BUDDY first');
+      return false;
+    }
     try {
-      await http.post(
-        Uri.parse('$_baseUrl/api/control/move'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'direction': direction,
-          'linear': linear,
-          'angular': angular,
-          'speed': _speedValue,
-        }),
-      ).timeout(const Duration(milliseconds: 500));
-    } catch (_) {}
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/api/control/action'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Buddy-Session': session,
+            },
+            body: jsonEncode({'action': action}),
+          )
+          .timeout(const Duration(seconds: 2));
+      if (response.statusCode != 200) {
+        _buddyNotice(
+          'BUDDY $action failed (HTTP ${response.statusCode}): ${response.body}',
+        );
+        if (mounted) setState(() => _buddyArmed = false);
+        return false;
+      }
+      if (mounted) setState(() => _buddyArmed = action == 'arm');
+      return true;
+    } catch (error) {
+      _buddyNotice('BUDDY connection error: $error');
+      if (mounted) setState(() => _buddyArmed = false);
+      return false;
+    }
+  }
+
+  Future<void> _buddyEmergency() async {
+    _driveHeartbeat?.cancel();
+    _driveHeartbeat = null;
+    _heldDriveDirection = 'STOP';
+    if (mounted) setState(() => _buddyArmed = false);
+    await _buddyAction('disarm');
+  }
+
+  Future<void> _showBuddyPairing() async {
+    if (_buddySession != null) {
+      final shouldArm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('BUDDY Motor Control'),
+          content: const Text(
+            'Raise the wheels and check the physical motor cutoff before arming.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('ARM MOTORS'),
+            ),
+          ],
+        ),
+      );
+      if (shouldArm == true) await _buddyAction('arm');
+      return;
+    }
+
+    final code = TextEditingController();
+    final shouldPair = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pair BUDDY Controller'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Enter the pairing code shown on Raspberry Pi. Only use on a trusted Wi-Fi network.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: code,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(labelText: 'Pairing code'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('PAIR'),
+          ),
+        ],
+      ),
+    );
+    final pin = code.text.trim().toUpperCase();
+    code.dispose();
+    if (shouldPair != true) return;
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$_baseUrl/api/control/pair'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'code': pin}),
+          )
+          .timeout(const Duration(seconds: 3));
+      if (res.statusCode != 200) {
+        _buddyNotice('Pairing rejected (HTTP ${res.statusCode})');
+        return;
+      }
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final session = data['session'];
+      if (session is! String || session.isEmpty)
+        throw Exception('Missing session');
+      if (mounted)
+        setState(() {
+          _buddySession = session;
+          _buddyArmed = false;
+        });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('buddy_paired_phone_session', session);
+      _buddyNotice('Paired! Tap ARM MOTORS to enable control.');
+    } catch (error) {
+      _buddyNotice('Pairing failed: $error');
+    }
+  }
+
+  Widget _buddyControlButton() => FloatingActionButton.extended(
+    heroTag: 'buddy-navigation-emergency',
+    onPressed: _buddyArmed ? _buddyEmergency : _showBuddyPairing,
+    backgroundColor: _buddyArmed ? Colors.red : const Color(0xFF2F80FF),
+    foregroundColor: Colors.white,
+    icon: Icon(_buddyArmed ? Icons.stop_circle : Icons.lock_open),
+    label: Text(
+      _buddyArmed
+          ? 'EMERGENCY STOP'
+          : _buddySession == null
+          ? 'PAIR CONTROL'
+          : 'ARM MOTORS',
+    ),
+  );
+
+  Future<void> _sendMoveCommand(
+    String direction,
+    double linear,
+    double angular,
+  ) async {
+    final session = _buddySession;
+    final dir = direction.toLowerCase();
+    final isStop = dir == 'stop' || dir == 'standby' || dir == 'idle';
+    if (session == null || (!_buddyArmed && !isStop)) return;
+    if (_buddySendingMove) {
+      if (isStop) _buddyStopQueued = true;
+      return;
+    }
+    _buddySendingMove = true;
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/api/control/move'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Buddy-Session': session,
+            },
+            body: jsonEncode({'direction': isStop ? 'stop' : dir}),
+          )
+          .timeout(const Duration(milliseconds: 300));
+      if (response.statusCode != 200 && !isStop) {
+        _driveHeartbeat?.cancel();
+        _driveHeartbeat = null;
+        _heldDriveDirection = 'STOP';
+        if (mounted) setState(() => _buddyArmed = false);
+        _buddyNotice(
+          'Movement rejected: HTTP ${response.statusCode}. ARM again.',
+        );
+      }
+    } catch (_) {
+      // Stop-on-lost-heartbeat is enforced by the Raspberry Pi controller.
+      _driveHeartbeat?.cancel();
+      _driveHeartbeat = null;
+      _heldDriveDirection = 'STOP';
+      if (mounted) setState(() => _buddyArmed = false);
+      _buddyNotice('Control connection lost — verify physical STOP.');
+    } finally {
+      _buddySendingMove = false;
+      if (_buddyStopQueued) {
+        _buddyStopQueued = false;
+        _sendMoveCommand('STOP', 0, 0);
+      }
+    }
   }
 
   void _updateJoystick(Offset localPosition, Size centerSize) {
@@ -150,10 +404,13 @@ class _ScreenControlState extends State<ScreenControl> {
       _currentDirection = direction;
     });
 
-    _sendMoveCommand(direction, linear, angular);
+    _syncDriveHeartbeat(direction);
   }
 
   void _resetJoystick() {
+    _driveHeartbeat?.cancel();
+    _driveHeartbeat = null;
+    _heldDriveDirection = 'STOP';
     setState(() {
       _joystickKnob = Offset.zero;
       _currentDirection = 'STANDBY';
@@ -189,6 +446,8 @@ class _ScreenControlState extends State<ScreenControl> {
         final isLandscape = orientation == Orientation.landscape;
 
         return Scaffold(
+          floatingActionButton: _buddyControlButton(),
+          floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
           backgroundColor: Colors.black,
           body: SafeArea(
             child: isLandscape
@@ -208,14 +467,20 @@ class _ScreenControlState extends State<ScreenControl> {
         Container(
           width: double.infinity,
           height: double.infinity,
-          color: _nightVision ? const Color(0xFF051C08) : const Color(0xFF0A1128),
+          color: _nightVision
+              ? const Color(0xFF051C08)
+              : const Color(0xFF0A1128),
           child: Image.network(
             _videoFeedUrl,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => Center(
               child: Text(
                 'BUDDY FPV STREAM OFFLINE',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -228,16 +493,54 @@ class _ScreenControlState extends State<ScreenControl> {
             height: 120,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3), width: 1),
+              border: Border.all(
+                color: Colors.cyanAccent.withValues(alpha: 0.3),
+                width: 1,
+              ),
             ),
             child: Stack(
               alignment: Alignment.center,
               children: [
-                Container(width: 4, height: 4, decoration: const BoxDecoration(color: Colors.cyanAccent, shape: BoxShape.circle)),
-                Positioned(top: 0, child: Container(width: 1, height: 10, color: Colors.cyanAccent.withValues(alpha: 0.5))),
-                Positioned(bottom: 0, child: Container(width: 1, height: 10, color: Colors.cyanAccent.withValues(alpha: 0.5))),
-                Positioned(left: 0, child: Container(width: 10, height: 1, color: Colors.cyanAccent.withValues(alpha: 0.5))),
-                Positioned(right: 0, child: Container(width: 10, height: 1, color: Colors.cyanAccent.withValues(alpha: 0.5))),
+                Container(
+                  width: 4,
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    color: Colors.cyanAccent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  child: Container(
+                    width: 1,
+                    height: 10,
+                    color: Colors.cyanAccent.withValues(alpha: 0.5),
+                  ),
+                ),
+                Positioned(
+                  bottom: 0,
+                  child: Container(
+                    width: 1,
+                    height: 10,
+                    color: Colors.cyanAccent.withValues(alpha: 0.5),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  child: Container(
+                    width: 10,
+                    height: 1,
+                    color: Colors.cyanAccent.withValues(alpha: 0.5),
+                  ),
+                ),
+                Positioned(
+                  right: 0,
+                  child: Container(
+                    width: 10,
+                    height: 1,
+                    color: Colors.cyanAccent.withValues(alpha: 0.5),
+                  ),
+                ),
               ],
             ),
           ),
@@ -254,18 +557,29 @@ class _ScreenControlState extends State<ScreenControl> {
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_new, size: 16, color: Colors.white),
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new,
+                      size: 16,
+                      color: Colors.white,
+                    ),
                     onPressed: () => Navigator.maybePop(context),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       'STATUS: $_currentDirection | SPEED: ${_speedValue.toStringAsFixed(1)} m/s',
-                      style: const TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                        color: Colors.cyanAccent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -273,18 +587,31 @@ class _ScreenControlState extends State<ScreenControl> {
               Row(
                 children: [
                   IconButton(
-                    icon: Icon(_headlightOn ? Icons.lightbulb : Icons.lightbulb_outline,
-                        color: _headlightOn ? Colors.amber : Colors.white70, size: 18),
+                    icon: Icon(
+                      _headlightOn ? Icons.lightbulb : Icons.lightbulb_outline,
+                      color: _headlightOn ? Colors.amber : Colors.white70,
+                      size: 18,
+                    ),
                     onPressed: () {
                       setState(() => _headlightOn = !_headlightOn);
-                      _triggerAction(_headlightOn ? 'Headlight ON' : 'Headlight OFF');
+                      _triggerAction(
+                        _headlightOn ? 'Headlight ON' : 'Headlight OFF',
+                      );
                     },
                   ),
                   IconButton(
-                    icon: Icon(Icons.nightlight_round, color: _nightVision ? const Color(0xFF27AE60) : Colors.white70, size: 18),
+                    icon: Icon(
+                      Icons.nightlight_round,
+                      color: _nightVision
+                          ? const Color(0xFF27AE60)
+                          : Colors.white70,
+                      size: 18,
+                    ),
                     onPressed: () {
                       setState(() => _nightVision = !_nightVision);
-                      _triggerAction(_nightVision ? 'Night Vision ON' : 'Night Vision OFF');
+                      _triggerAction(
+                        _nightVision ? 'Night Vision ON' : 'Night Vision OFF',
+                      );
                     },
                   ),
                 ],
@@ -294,11 +621,7 @@ class _ScreenControlState extends State<ScreenControl> {
         ),
 
         // Left Thumb: 360 Analog Joystick
-        Positioned(
-          bottom: 20,
-          left: 30,
-          child: _buildAnalogJoystick(),
-        ),
+        Positioned(bottom: 20, left: 30, child: _buildAnalogJoystick()),
 
         // Right Thumb: Quick Action Buttons
         Positioned(
@@ -309,23 +632,37 @@ class _ScreenControlState extends State<ScreenControl> {
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildOverlayCircleBtn(Icons.pets, 'Paw', () => _triggerAction('Give Paw')),
+                  _buildOverlayCircleBtn(
+                    Icons.pets,
+                    'Paw',
+                    () => _triggerAction('Give Paw'),
+                  ),
                   const SizedBox(height: 8),
-                  _buildOverlayCircleBtn(Icons.volume_up, 'Bark', () => _triggerAction('Bark')),
+                  _buildOverlayCircleBtn(
+                    Icons.volume_up,
+                    'Bark',
+                    () => _triggerAction('Bark'),
+                  ),
                 ],
               ),
               const SizedBox(width: 12),
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildOverlayCircleBtn(Icons.replay_rounded, 'Roll', () => _triggerAction('Roll 360')),
+                  _buildOverlayCircleBtn(
+                    Icons.replay_rounded,
+                    'Roll',
+                    () => _triggerAction('Roll 360'),
+                  ),
                   const SizedBox(height: 8),
                   _buildOverlayCircleBtn(
                     Icons.person_pin_circle_rounded,
                     'Follow',
                     () {
                       setState(() => _followMode = !_followMode);
-                      _triggerAction(_followMode ? 'Follow Mode ON' : 'Follow Mode OFF');
+                      _triggerAction(
+                        _followMode ? 'Follow Mode ON' : 'Follow Mode OFF',
+                      );
                     },
                     isActive: _followMode,
                   ),
@@ -338,134 +675,169 @@ class _ScreenControlState extends State<ScreenControl> {
     );
   }
 
-  // 2. PORTRAIT MODE
+  // Portrait FPV: a separate 16:9 camera, with driving controls below it.
+  // The camera uses the same registered MJPEG view as the Camera tab.
   Widget _buildPortraitCockpit(bool isDark) {
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
         child: Column(
           children: [
-            // Top Header
+            // Header stays above the live camera.
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               color: isDark ? const Color(0xFF08111F) : const Color(0xFF162033),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new, size: 16, color: Colors.white),
-                        onPressed: () => Navigator.maybePop(context),
-                      ),
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'FPV PILOT COCKPIT',
-                            style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
-                          ),
-                          Text('Rotate phone for Landscape Gaming Mode', style: TextStyle(color: Colors.white60, fontSize: 9)),
-                        ],
-                      ),
-                    ],
+                  IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                    onPressed: () => Navigator.maybePop(context),
                   ),
-                  Row(
-                    children: [
-                      IconButton(
-                        icon: Icon(_headlightOn ? Icons.lightbulb : Icons.lightbulb_outline,
-                            color: _headlightOn ? Colors.amber : Colors.white60, size: 20),
-                        onPressed: () {
-                          setState(() => _headlightOn = !_headlightOn);
-                          _triggerAction(_headlightOn ? 'Headlight ON' : 'Headlight OFF');
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.nightlight_round, color: _nightVision ? const Color(0xFF27AE60) : Colors.white60, size: 20),
-                        onPressed: () {
-                          setState(() => _nightVision = !_nightVision);
-                          _triggerAction(_nightVision ? 'Night Vision ON' : 'Night Vision OFF');
-                        },
-                      ),
-                    ],
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'FPV PILOT COCKPIT',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          'Live view and driving controls',
+                          style: TextStyle(color: Colors.white60, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Headlight',
+                    icon: Icon(
+                      _headlightOn ? Icons.lightbulb : Icons.lightbulb_outline,
+                      color: _headlightOn ? Colors.amber : Colors.white60,
+                      size: 20,
+                    ),
+                    onPressed: () {
+                      setState(() => _headlightOn = !_headlightOn);
+                      _triggerAction(
+                        _headlightOn ? 'Headlight ON' : 'Headlight OFF',
+                      );
+                    },
+                  ),
+                  IconButton(
+                    tooltip: 'Night vision',
+                    icon: Icon(
+                      Icons.nightlight_round,
+                      color: _nightVision
+                          ? const Color(0xFF27AE60)
+                          : Colors.white60,
+                      size: 20,
+                    ),
+                    onPressed: () {
+                      setState(() => _nightVision = !_nightVision);
+                      _triggerAction(
+                        _nightVision ? 'Night Vision ON' : 'Night Vision OFF',
+                      );
+                    },
                   ),
                 ],
               ),
             ),
 
-            // Live Camera Viewport
+            // Scroll only the camera/controls section on smaller phones.
+            // The bottom navigation always stays at the bottom of the screen.
             Expanded(
-              child: Stack(
-                children: [
-                  Container(
-                    width: double.infinity,
-                    height: double.infinity,
-                    color: _nightVision ? const Color(0xFF051C08) : const Color(0xFF0A1128),
-                    child: Image.network(
-                      _videoFeedUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Center(
-                        child: Text(
-                          'BUDDY LIVE STREAM OFFLINE',
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12, fontWeight: FontWeight.bold),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ColoredBox(
+                              color: _nightVision
+                                  ? const Color(0xFF051C08)
+                                  : const Color(0xFF0A1128),
+                              child: kIsWeb
+                                  ? HtmlElementView(
+                                      viewType: _controlFpvViewType,
+                                    )
+                                  : Image.network(
+                                      _videoFeedUrl,
+                                      fit: BoxFit.cover,
+                                      gaplessPlayback: true,
+                                      errorBuilder: (_, error, stackTrace) =>
+                                          const Center(
+                                            child: Text(
+                                              'BUDDY LIVE STREAM OFFLINE',
+                                              style: TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                    ),
+                            ),
+                            Positioned(
+                              left: 8,
+                              top: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.7),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'STATUS: $_currentDirection',
+                                  style: const TextStyle(
+                                    color: Colors.cyanAccent,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                  ),
-
-                  // Center Crosshairs
-                  Center(
-                    child: Container(
-                      width: 120,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3), width: 1),
-                      ),
+                    const SizedBox(height: 10),
+                    // Mapping is outside the camera so it never covers the feed.
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ScreenMapping(),
+                            ),
+                          ),
+                          icon: const Icon(Icons.radar, size: 16),
+                          label: const Text('Scan Area'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.lightBlueAccent,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-
-                  // Status Indicator
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.7),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        'STATUS: $_currentDirection',
-                        style: const TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                  ),
-
-                  // BUDDY stationary ultrasonic mapping (read-only)
-                   Positioned(
-                     top: 55,
-                     right: 12,
-                     child: ElevatedButton.icon(
-                       onPressed: () => Navigator.push(
-                         context,
-                         MaterialPageRoute(builder: (_) => const ScreenMapping()),
-                       ),
-                       icon: const Icon(Icons.radar, size: 18),
-                       label: const Text('Scan Area'),
-                       style: ElevatedButton.styleFrom(
-                         backgroundColor: const Color(0xFF008EFF),
-                         foregroundColor: Colors.white,
-                       ),
-                     ),
-                   ),
-
-                   // Posture Switches
-                  Positioned(
-                    bottom: 170,
-                    left: 16,
-                    right: 16,
-                    child: Row(
+                    const SizedBox(height: 6),
+                    // Posture buttons have their own row, not positioned on video.
+                    Row(
                       children: [
                         _buildPosturePill('Stand'),
                         const SizedBox(width: 6),
@@ -476,27 +848,36 @@ class _ScreenControlState extends State<ScreenControl> {
                         _buildPosturePill('Shake'),
                       ],
                     ),
-                  ),
-
-                  // Analog Joystick
-                  Positioned(
-                    bottom: 10,
-                    left: 0,
-                    right: 0,
-                    child: Center(child: _buildAnalogJoystick()),
-                  ),
-                ],
+                    const SizedBox(height: 18),
+                    // Existing proven press/hold heartbeat and release-to-stop.
+                    Center(child: _buildAnalogJoystick()),
+                    const SizedBox(height: 12),
+                    Center(
+                      child: Text(
+                        _buddyArmed
+                            ? 'Motors armed  •  release a direction to STOP'
+                            : 'ARM MOTORS before driving',
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
 
-            // Bottom Navigation
+            // Navigation stays outside the scrollable control area.
             Container(
               padding: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF162033) : Colors.white,
                 border: Border(
                   top: BorderSide(
-                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                    color: isDark
+                        ? const Color(0xFF1E293B)
+                        : const Color(0xFFE2E8F0),
                   ),
                 ),
               ),
@@ -518,84 +899,70 @@ class _ScreenControlState extends State<ScreenControl> {
   }
 
   // 360 Analog Controller Widget
-  Widget _buildAnalogJoystick() {
-    return GestureDetector(
-      onPanStart: (details) => _updateJoystick(details.localPosition, const Size(140, 140)),
-      onPanUpdate: (details) => _updateJoystick(details.localPosition, const Size(140, 140)),
-      onPanEnd: (_) => _resetJoystick(),
-      child: Container(
-        width: 140,
-        height: 140,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.black.withValues(alpha: 0.55),
-          border: Border.all(
-            color: const Color(0xFF2F80FF).withValues(alpha: 0.6),
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF2F80FF).withValues(alpha: 0.2),
-              blurRadius: 14,
-            )
-          ],
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white12, width: 1),
-              ),
-            ),
-            const Positioned(top: 4, child: Icon(Icons.keyboard_arrow_up, size: 16, color: Colors.white60)),
-            const Positioned(bottom: 4, child: Icon(Icons.keyboard_arrow_down, size: 16, color: Colors.white60)),
-            const Positioned(left: 4, child: Icon(Icons.keyboard_arrow_left, size: 16, color: Colors.white60)),
-            const Positioned(right: 4, child: Icon(Icons.keyboard_arrow_right, size: 16, color: Colors.white60)),
 
-            // The Analog Draggable Thumb Knob
-            Transform.translate(
-              offset: _joystickKnob,
-              child: Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const RadialGradient(
-                    colors: [Color(0xFF5BA0FF), Color(0xFF2F80FF)],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF2F80FF).withValues(alpha: 0.6),
-                      blurRadius: 8,
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.drag_indicator_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-            ),
-          ],
+  Widget _buildAnalogJoystick() {
+    Widget directionButton(String direction, IconData icon) {
+      return Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (_) {
+          setState(() => _currentDirection = direction);
+          _syncDriveHeartbeat(direction);
+        },
+        onPointerUp: (_) => _resetJoystick(),
+        onPointerCancel: (_) => _resetJoystick(),
+        child: Container(
+          width: 44,
+          height: 44,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: const Color(0xFF173F60),
+            border: Border.all(color: const Color(0xFF2F80FF)),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: Colors.white, size: 27),
         ),
+      );
+    }
+
+    return SizedBox(
+      width: 140,
+      height: 140,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          directionButton('FORWARD', Icons.keyboard_arrow_up),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              directionButton('LEFT', Icons.keyboard_arrow_left),
+              directionButton('RIGHT', Icons.keyboard_arrow_right),
+            ],
+          ),
+          directionButton('BACKWARD', Icons.keyboard_arrow_down),
+        ],
       ),
     );
   }
 
-  Widget _buildOverlayCircleBtn(IconData icon, String label, VoidCallback onTap, {bool isActive = false}) {
+  Widget _buildOverlayCircleBtn(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    bool isActive = false,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF27AE60) : Colors.black.withValues(alpha: 0.65),
+          color: isActive
+              ? const Color(0xFF27AE60)
+              : Colors.black.withValues(alpha: 0.65),
           shape: BoxShape.circle,
-          border: Border.all(color: isActive ? Colors.white : Colors.white24, width: 1.2),
+          border: Border.all(
+            color: isActive ? Colors.white : Colors.white24,
+            width: 1.2,
+          ),
         ),
         child: Icon(icon, color: Colors.white, size: 18),
       ),
@@ -613,9 +980,13 @@ class _ScreenControlState extends State<ScreenControl> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF2F80FF) : Colors.black.withValues(alpha: 0.6),
+            color: isSelected
+                ? const Color(0xFF2F80FF)
+                : Colors.black.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: isSelected ? const Color(0xFF2F80FF) : Colors.white24),
+            border: Border.all(
+              color: isSelected ? const Color(0xFF2F80FF) : Colors.white24,
+            ),
           ),
           alignment: Alignment.center,
           child: Text(
@@ -642,7 +1013,9 @@ class _ScreenControlState extends State<ScreenControl> {
           Icon(
             icon,
             size: 22,
-            color: isSelected ? const Color(0xFF2F80FF) : (isDark ? const Color(0xFF8F9BB3) : Colors.black54),
+            color: isSelected
+                ? const Color(0xFF2F80FF)
+                : (isDark ? const Color(0xFF8F9BB3) : Colors.black54),
           ),
           const SizedBox(height: 3),
           Text(
@@ -650,7 +1023,9 @@ class _ScreenControlState extends State<ScreenControl> {
             style: TextStyle(
               fontSize: 10,
               fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-              color: isSelected ? const Color(0xFF2F80FF) : (isDark ? const Color(0xFF8F9BB3) : Colors.black54),
+              color: isSelected
+                  ? const Color(0xFF2F80FF)
+                  : (isDark ? const Color(0xFF8F9BB3) : Colors.black54),
             ),
           ),
         ],
